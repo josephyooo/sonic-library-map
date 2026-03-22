@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import DashboardClient from "./DashboardClient";
 
 export default async function Dashboard() {
   const session = await getSession();
@@ -28,14 +29,7 @@ export default async function Dashboard() {
         </div>
       </header>
       <main className="flex flex-1 items-center justify-center">
-        <div className="text-center">
-          <p className="text-2xl font-semibold">
-            Welcome, {session.displayName}!
-          </p>
-          <p className="mt-2 text-zinc-400">
-            Your library visualization will appear here.
-          </p>
-        </div>
+        <DashboardClient />
       </main>
     </div>
   );
