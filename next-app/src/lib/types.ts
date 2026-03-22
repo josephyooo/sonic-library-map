@@ -13,3 +13,11 @@ export interface LibraryData {
   artists: SpotifyArtist[];
   fetchedAt: number;
 }
+
+export interface PlotPoint {
+  id: string;
+  x: number;
+  y: number;
+  track: SpotifyTrack;
+  playlistIds: string[];
+}
