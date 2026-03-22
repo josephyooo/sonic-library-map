@@ -10,7 +10,7 @@ export default async function Dashboard() {
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-950 text-white">
+    <div className="flex h-screen flex-col bg-zinc-950 text-white">
       <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
         <h1 className="text-xl font-bold">Spotify Library Viz</h1>
         <div className="flex items-center gap-4">
@@ -28,7 +28,7 @@ export default async function Dashboard() {
           </a>
         </div>
       </header>
-      <main className="flex flex-1 items-center justify-center">
+      <main className="flex-1 overflow-hidden">
         <DashboardClient />
       </main>
     </div>
