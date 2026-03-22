@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useMemo, useState } from "react";
 import * as d3 from "d3";
 import type { PlotPoint } from "@/lib/types";
 
 const POINT_RADIUS = 3;
 const HOVER_RADIUS = 6;
-const UNSAVED_COLOR = "#71717a"; // zinc-500
+const UNSAVED_COLOR = "#71717a";
 
 export interface PlaylistColor {
   id: string;
@@ -28,6 +28,7 @@ interface ScatterPlotProps {
   onClick: (point: PlotPoint) => void;
   xLabel: string;
   yLabel: string;
+  xFormat?: (tick: number) => string;
 }
 
 export type { HoveredPoint };
@@ -39,6 +40,7 @@ export default function ScatterPlot({
   onClick,
   xLabel,
   yLabel,
+  xFormat,
 }: ScatterPlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -46,58 +48,42 @@ export default function ScatterPlot({
   const hoveredRef = useRef<PlotPoint | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
-  // Build color lookup from playlist visibility
-  const colorMapRef = useRef<Map<string, { color: string; visible: boolean }>>(
-    new Map(),
-  );
-  useEffect(() => {
+  // Precompute color lookup and visibility flag
+  const { colorMap, anyPlaylistVisible } = useMemo(() => {
     const m = new Map<string, { color: string; visible: boolean }>();
+    let anyVisible = false;
     for (const pc of playlistColors) {
       m.set(pc.id, { color: pc.color, visible: pc.visible });
+      if (pc.visible) anyVisible = true;
     }
-    colorMapRef.current = m;
+    return { colorMap: m, anyPlaylistVisible: anyVisible };
   }, [playlistColors]);
 
-  // Scales — map data coords to pixel coords
-  const xScale = useCallback(() => {
-    const margin = 60;
+  // Memoized scales (avoids O(n) d3.extent on every call)
+  const xs = useMemo(() => {
     const xExtent = d3.extent(points, (p) => p.x) as [number, number];
-    return d3
-      .scaleLinear()
-      .domain(xExtent)
-      .range([margin, size.width - 20]);
+    return d3.scaleLinear().domain(xExtent).range([60, size.width - 20]);
   }, [points, size.width]);
 
-  const yScale = useCallback(() => {
-    const margin = 40;
+  const ys = useMemo(() => {
     const yExtent = d3.extent(points, (p) => p.y) as [number, number];
-    return d3
-      .scaleLinear()
-      .domain(yExtent)
-      .range([size.height - margin, 20]);
+    return d3.scaleLinear().domain(yExtent).range([size.height - 40, 20]);
   }, [points, size.height]);
 
-  // Resolve a point's display color based on its playlist membership
   const getPointColor = useCallback(
     (point: PlotPoint): string | null => {
-      const cm = colorMapRef.current;
-      // Find first visible playlist this track belongs to
       for (const pid of point.playlistIds) {
-        const entry = cm.get(pid);
+        const entry = colorMap.get(pid);
         if (entry?.visible) return entry.color;
       }
-      // If track is in playlists but none visible, hide it
-      if (point.playlistIds.length > 0) {
-        // Check if ANY playlist filter is active
-        const anyVisible = [...cm.values()].some((e) => e.visible);
-        if (anyVisible) return null; // hidden
-      }
+      // Track is in playlists but none of its playlists are visible — hide it
+      // (only when some filter is active, otherwise show as unsaved)
+      if (point.playlistIds.length > 0 && anyPlaylistVisible) return null;
       return UNSAVED_COLOR;
     },
-    [],
+    [colorMap, anyPlaylistVisible],
   );
 
-  // Draw everything on canvas
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0) return;
@@ -111,17 +97,12 @@ export default function ScatterPlot({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const transform = transformRef.current;
-    const xs = xScale();
-    const ys = yScale();
 
-    // Clear
-    ctx.fillStyle = "#09090b"; // zinc-950
+    ctx.fillStyle = "#09090b";
     ctx.fillRect(0, 0, size.width, size.height);
 
-    // Draw axes
-    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel);
+    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat);
 
-    // Draw points
     const hovered = hoveredRef.current;
     for (const point of points) {
       const color = getPointColor(point);
@@ -130,7 +111,6 @@ export default function ScatterPlot({
       const px = transform.applyX(xs(point.x));
       const py = transform.applyY(ys(point.y));
 
-      // Skip points outside viewport
       if (px < -10 || px > size.width + 10 || py < -10 || py > size.height + 10)
         continue;
 
@@ -150,9 +130,8 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xScale, yScale, getPointColor, xLabel, yLabel]);
+  }, [points, size, xs, ys, getPointColor, xLabel, yLabel, xFormat]);
 
-  // Resize observer
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -165,12 +144,10 @@ export default function ScatterPlot({
     return () => ro.disconnect();
   }, []);
 
-  // Redraw when anything changes
   useEffect(() => {
     draw();
   }, [draw]);
 
-  // D3 zoom
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0) return;
@@ -190,45 +167,39 @@ export default function ScatterPlot({
     };
   }, [size, draw]);
 
-  // Quadtree for hit testing
   const quadtreeRef = useRef<d3.Quadtree<PlotPoint> | null>(null);
   useEffect(() => {
-    const xs = xScale();
-    const ys = yScale();
     quadtreeRef.current = d3
       .quadtree<PlotPoint>()
       .x((p) => xs(p.x))
       .y((p) => ys(p.y))
       .addAll(points);
-  }, [points, xScale, yScale]);
+  }, [points, xs, ys]);
 
-  // Mouse move — hit test
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Hit-test helper: convert screen coords to scale-space and find nearest point
+  const findPointAt = useCallback(
+    (clientX: number, clientY: number, radius: number): PlotPoint | undefined => {
       const canvas = canvasRef.current;
       const qt = quadtreeRef.current;
-      if (!canvas || !qt) return;
+      if (!canvas || !qt) return undefined;
 
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-
       const transform = transformRef.current;
-      // Invert the transform to get data-space coordinates
-      const dataX = transform.invertX(mx);
-      const dataY = transform.invertY(my);
+      const dataX = transform.invertX(clientX - rect.left);
+      const dataY = transform.invertY(clientY - rect.top);
 
-      const nearest = qt.find(dataX, dataY, 20 / transform.k);
+      return qt.find(dataX, dataY, radius / transform.k) ?? undefined;
+    },
+    [],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const nearest = findPointAt(e.clientX, e.clientY, 20);
 
       if (nearest && nearest !== hoveredRef.current) {
         hoveredRef.current = nearest;
-        const xs = xScale();
-        const ys = yScale();
-        onHover({
-          point: nearest,
-          screenX: e.clientX,
-          screenY: e.clientY,
-        });
+        onHover({ point: nearest, screenX: e.clientX, screenY: e.clientY });
         draw();
       } else if (!nearest && hoveredRef.current) {
         hoveredRef.current = null;
@@ -236,29 +207,15 @@ export default function ScatterPlot({
         draw();
       }
     },
-    [draw, onHover, xScale, yScale],
+    [draw, onHover, findPointAt],
   );
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current;
-      const qt = quadtreeRef.current;
-      if (!canvas || !qt) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-
-      const transform = transformRef.current;
-      const dataX = transform.invertX(mx);
-      const dataY = transform.invertY(my);
-
-      const nearest = qt.find(dataX, dataY, 15 / transform.k);
-      if (nearest) {
-        onClick(nearest);
-      }
+      const nearest = findPointAt(e.clientX, e.clientY, 15);
+      if (nearest) onClick(nearest);
     },
-    [onClick],
+    [onClick, findPointAt],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -291,17 +248,18 @@ function drawAxes(
   size: { width: number; height: number },
   xLabel: string,
   yLabel: string,
+  xFormat?: (tick: number) => string,
 ) {
   const xTicks = xs.ticks(8);
   const yTicks = ys.ticks(6);
+  const formatX = xFormat ?? ((t: number) => t.toFixed(1));
 
-  ctx.strokeStyle = "#27272a"; // zinc-800
+  ctx.strokeStyle = "#27272a";
   ctx.lineWidth = 1;
-  ctx.fillStyle = "#71717a"; // zinc-500
+  ctx.fillStyle = "#71717a";
   ctx.font = "11px ui-monospace, monospace";
   ctx.textAlign = "center";
 
-  // X-axis grid + labels
   for (const tick of xTicks) {
     const px = transform.applyX(xs(tick));
     if (px < 40 || px > size.width - 10) continue;
@@ -310,15 +268,9 @@ function drawAxes(
     ctx.moveTo(px, 20);
     ctx.lineTo(px, size.height - 40);
     ctx.stroke();
-
-    ctx.fillText(
-      xLabel === "Release Year" ? String(Math.round(tick)) : tick.toFixed(1),
-      px,
-      size.height - 25,
-    );
+    ctx.fillText(formatX(tick), px, size.height - 25);
   }
 
-  // Y-axis grid + labels
   ctx.textAlign = "right";
   for (const tick of yTicks) {
     const py = transform.applyY(ys(tick));
@@ -328,12 +280,10 @@ function drawAxes(
     ctx.moveTo(50, py);
     ctx.lineTo(size.width - 10, py);
     ctx.stroke();
-
     ctx.fillText(String(Math.round(tick)), 45, py + 4);
   }
 
-  // Axis labels
-  ctx.fillStyle = "#a1a1aa"; // zinc-400
+  ctx.fillStyle = "#a1a1aa";
   ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(xLabel, size.width / 2, size.height - 6);

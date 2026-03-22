@@ -10,13 +10,14 @@ import ScatterPlot, {
 import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
 
-// 20 visually distinct colors for playlist assignment
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
   "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
   "#06b6d4", "#e11d48", "#8b5cf6", "#10b981", "#d946ef",
   "#0ea5e9", "#facc15", "#fb923c", "#34d399", "#c084fc",
 ];
+
+const formatYear = (tick: number) => String(Math.round(tick));
 
 function parseReleaseYear(date: string): number {
   const year = parseInt(date.slice(0, 4), 10);
@@ -30,7 +31,6 @@ export default function DashboardClient() {
     Record<string, boolean>
   >({});
 
-  // Deduplicated playlists
   const playlists = useMemo(() => {
     if (!libraryData) return [];
     const seen = new Set<string>();
@@ -41,7 +41,6 @@ export default function DashboardClient() {
     });
   }, [libraryData]);
 
-  // Build reverse lookup: trackId -> playlistIds[]
   const trackPlaylistMap = useMemo(() => {
     if (!libraryData) return new Map<string, string[]>();
     const map = new Map<string, string[]>();
@@ -58,7 +57,6 @@ export default function DashboardClient() {
     return map;
   }, [libraryData]);
 
-  // Playlist color assignments
   const playlistColors = useMemo((): PlaylistColor[] => {
     return playlists.map((p, i) => ({
       id: p.id,
@@ -68,40 +66,21 @@ export default function DashboardClient() {
     }));
   }, [playlists, playlistVisibility]);
 
-  // Playlist name lookup for tooltip
   const playlistNames = useMemo(() => {
     const m = new Map<string, string>();
     for (const p of playlists) m.set(p.id, p.name);
     return m;
   }, [playlists]);
 
-  // Transform tracks into plot points
   const points = useMemo((): PlotPoint[] => {
     if (!libraryData) return [];
-
-    // Collect all unique tracks (saved + playlist)
-    const trackMap = new Map<string, PlotPoint>();
-
-    for (const track of libraryData.tracks) {
-      trackMap.set(track.id, {
-        id: track.id,
-        x: parseReleaseYear(track.album.release_date),
-        y: track.popularity,
-        track,
-        playlistIds: trackPlaylistMap.get(track.id) ?? [],
-      });
-    }
-
-    // Also add tracks that are only in playlists
-    for (const [pid, trackIds] of Object.entries(libraryData.playlistTracks)) {
-      for (const tid of trackIds) {
-        if (trackMap.has(tid)) continue;
-        // We don't have full track data for playlist-only tracks
-        // They were fetched but stored as IDs only — skip for now
-      }
-    }
-
-    return [...trackMap.values()];
+    return libraryData.tracks.map((track) => ({
+      id: track.id,
+      x: parseReleaseYear(track.album.release_date),
+      y: track.popularity,
+      track,
+      playlistIds: trackPlaylistMap.get(track.id) ?? [],
+    }));
   }, [libraryData, trackPlaylistMap]);
 
   const handleToggle = useCallback((id: string) => {
@@ -132,7 +111,6 @@ export default function DashboardClient() {
 
   return (
     <div className="flex h-full w-full">
-      {/* Main scatter plot area */}
       <div className="relative flex-1">
         <ScatterPlot
           points={points}
@@ -141,20 +119,18 @@ export default function DashboardClient() {
           onClick={handleClick}
           xLabel="Release Year"
           yLabel="Popularity"
+          xFormat={formatYear}
         />
-        {/* Stats bar */}
         <div className="absolute left-4 top-4 flex gap-3">
           <StatBadge label="Tracks" value={points.length} />
           <StatBadge label="Playlists" value={playlists.length} />
           <StatBadge label="Artists" value={libraryData.artists.length} />
         </div>
-        {/* Tooltip */}
         {hovered && (
           <SongTooltip info={hovered} playlistNames={playlistNames} />
         )}
       </div>
 
-      {/* Playlist legend sidebar */}
       <div className="w-56">
         <PlaylistLegend
           playlists={playlistColors}

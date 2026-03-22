@@ -13,23 +13,15 @@ export default function SongTooltip({ info, playlistNames }: SongTooltipProps) {
   const albumArt = track.album.images.find((img) => img.width <= 64)?.url
     ?? track.album.images[track.album.images.length - 1]?.url;
 
-  // Position tooltip offset from cursor, flip if near edges
+  const flipX = screenX > window.innerWidth - 280;
+  const flipY = screenY > window.innerHeight - 150;
   const style: React.CSSProperties = {
     position: "fixed",
-    left: screenX + 16,
-    top: screenY - 10,
+    left: flipX ? screenX - 280 : screenX + 16,
+    top: flipY ? screenY - 120 : screenY - 10,
     zIndex: 50,
     pointerEvents: "none",
   };
-
-  // Flip horizontally if too close to right edge
-  if (typeof window !== "undefined" && screenX > window.innerWidth - 280) {
-    style.left = screenX - 280;
-  }
-  // Flip vertically if too close to bottom
-  if (typeof window !== "undefined" && screenY > window.innerHeight - 150) {
-    style.top = screenY - 120;
-  }
 
   const playlists = point.playlistIds
     .map((id) => playlistNames.get(id))
