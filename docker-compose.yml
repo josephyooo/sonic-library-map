@@ -1,0 +1,31 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.next
+    ports:
+      - "3000:3000"
+    environment:
+      UMAP_SERVICE_URL: http://umap:8000
+      DATABASE_PATH: /data/spotify-library.db
+    env_file:
+      - .env.local
+    volumes:
+      - db-data:/data
+    depends_on:
+      umap:
+        condition: service_healthy
+
+  umap:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      retries: 3
+
+volumes:
+  db-data:
