@@ -49,3 +49,6 @@ yarn-error.log*
 # Misc
 *.tsbuildinfo
 next-env.d.ts
+
+# SQLite database files
+next-app/data/
