@@ -11,10 +11,13 @@ from ytmusicapi import YTMusic
 
 from audio_source import (
     TrackQuery,
-    get_all_cached_matches,
+    cache_features,
+    get_all_cached_features,
+    get_cached_features,
     get_cached_match,
     search_and_download,
 )
+from feature_extract import extract_features
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,11 +78,11 @@ class FeaturesRequest(BaseModel):
 
 
 @app.post("/features")
-async def extract_features(request: FeaturesRequest):
-    """Search YouTube Music, download audio, and extract features.
+async def run_feature_extraction(request: FeaturesRequest):
+    """Search YouTube Music, download audio, extract Essentia features, cache results.
 
     Returns SSE stream with progress events and final results.
-    Phase 4a: search + download only. Essentia extraction added in Phase 4b.
+    Audio files are deleted immediately after feature extraction.
     """
 
     async def generate():
@@ -88,21 +91,21 @@ async def extract_features(request: FeaturesRequest):
 
         yt = get_yt()
         total = len(request.tracks)
-        matched = 0
+        extracted = 0
         failed = 0
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for i, track in enumerate(request.tracks):
-                # Skip if we already have cached features for this track
-                cached = await asyncio.to_thread(get_cached_match, track.spotify_id)
+                # Skip if we already have cached features
+                cached = await asyncio.to_thread(get_cached_features, track.spotify_id)
                 if cached is not None:
-                    matched += 1
+                    extracted += 1
                     yield send({
                         "type": "progress",
                         "message": f"Cached: {track.name}",
                         "current": i + 1,
                         "total": total,
-                        "matched": matched,
+                        "extracted": extracted,
                         "failed": failed,
                     })
                     continue
@@ -116,33 +119,48 @@ async def extract_features(request: FeaturesRequest):
 
                 yield send({
                     "type": "progress",
-                    "message": f"Searching: {track.name} — {track.artist}",
+                    "message": f"Processing: {track.name} — {track.artist}",
                     "current": i + 1,
                     "total": total,
-                    "matched": matched,
+                    "extracted": extracted,
                     "failed": failed,
                 })
 
+                # Search + download
                 result = await asyncio.to_thread(
                     search_and_download, yt, query, tmpdir
                 )
 
-                if result is not None:
-                    matched += 1
-                    # Delete audio file immediately (Phase 4b will process before deleting)
-                    if os.path.exists(result.file_path):
-                        os.remove(result.file_path)
+                if result is None:
+                    failed += 1
+                    continue
+
+                # Extract features with Essentia
+                features = await asyncio.to_thread(
+                    extract_features, result.file_path
+                )
+
+                # Delete audio immediately
+                if os.path.exists(result.file_path):
+                    os.remove(result.file_path)
+
+                if features is not None:
+                    await asyncio.to_thread(
+                        cache_features, track.spotify_id, features
+                    )
+                    extracted += 1
                 else:
                     failed += 1
 
-            # Return summary
-            all_matches = await asyncio.to_thread(get_all_cached_matches)
+            # Return summary with all cached features
+            all_features = await asyncio.to_thread(get_all_cached_features)
             yield send({
                 "type": "complete",
-                "matched": matched,
+                "extracted": extracted,
                 "failed": failed,
                 "total": total,
-                "cached_total": len(all_matches),
+                "cached_total": len(all_features),
+                "features": all_features,
             })
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -153,8 +171,10 @@ async def extract_features(request: FeaturesRequest):
 
 @app.get("/matches")
 async def list_matches():
-    """Return all cached YouTube Music matches."""
+    """Return all cached YouTube Music matches with feature status."""
+    from audio_source import get_all_cached_matches
     matches = get_all_cached_matches()
+    all_features = get_all_cached_features()
     return [
         {
             "spotify_id": m.spotify_id,
@@ -163,6 +183,7 @@ async def list_matches():
             "artist": m.artist,
             "duration_s": m.duration_s,
             "youtube_url": f"https://music.youtube.com/watch?v={m.video_id}",
+            "has_features": m.spotify_id in all_features,
         }
         for m in matches
     ]

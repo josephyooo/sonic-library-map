@@ -8,6 +8,7 @@ Audio files are temporary — deleted after processing. Only the YouTube video I
 and extracted features are cached.
 """
 
+import json
 import logging
 import os
 import re
@@ -63,6 +64,13 @@ def _get_db() -> sqlite3.Connection:
             duration_s INTEGER NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS audio_features (
+            spotify_id TEXT PRIMARY KEY,
+            features TEXT NOT NULL,
+            FOREIGN KEY (spotify_id) REFERENCES youtube_matches(spotify_id)
+        )
+    """)
     conn.commit()
     return conn
 
@@ -94,6 +102,35 @@ def get_all_cached_matches() -> list[MatchResult]:
     rows = conn.execute("SELECT spotify_id, video_id, title, artist, duration_s FROM youtube_matches").fetchall()
     conn.close()
     return [MatchResult(*row) for row in rows]
+
+
+def get_cached_features(spotify_id: str) -> list[float] | None:
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT features FROM audio_features WHERE spotify_id = ?",
+        (spotify_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return json.loads(row[0])
+
+
+def cache_features(spotify_id: str, features: list[float]) -> None:
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO audio_features (spotify_id, features) VALUES (?, ?)",
+        (spotify_id, json.dumps(features)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_all_cached_features() -> dict[str, list[float]]:
+    conn = _get_db()
+    rows = conn.execute("SELECT spotify_id, features FROM audio_features").fetchall()
+    conn.close()
+    return {row[0]: json.loads(row[1]) for row in rows}
 
 
 # ─── YouTube Music Search ────────────────────────────────────────────────────
@@ -155,10 +192,11 @@ def search_track(yt: YTMusic, query: TrackQuery, duration_tolerance_s: int = 5) 
 def download_audio(video_id: str, output_dir: str) -> str | None:
     """Download audio for a YouTube video ID. Returns path to downloaded file."""
     opts = {
-        "format": "bestaudio[abr<=128]/worstaudio",
+        "format": "bestaudio",
         "outtmpl": os.path.join(output_dir, f"{video_id}.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
+        "cookiesfrombrowser": ("chrome",),
     }
 
     try:
