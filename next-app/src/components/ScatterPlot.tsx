@@ -84,6 +84,19 @@ export default function ScatterPlot({
     [colorMap, anyPlaylistVisible],
   );
 
+  // Group points by playlist for hull drawing
+  const playlistPointMap = useMemo(() => {
+    const map = new Map<string, PlotPoint[]>();
+    for (const point of points) {
+      for (const pid of point.playlistIds) {
+        const arr = map.get(pid);
+        if (arr) arr.push(point);
+        else map.set(pid, [point]);
+      }
+    }
+    return map;
+  }, [points]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0) return;
@@ -103,6 +116,75 @@ export default function ScatterPlot({
 
     drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat);
 
+    // Draw playlist boundaries (convex hulls) behind points
+    for (const pc of playlistColors) {
+      if (!pc.visible) continue;
+      const pPoints = playlistPointMap.get(pc.id);
+      if (!pPoints || pPoints.length === 0) continue;
+
+      const screenCoords: [number, number][] = pPoints.map((p) => [
+        transform.applyX(xs(p.x)),
+        transform.applyY(ys(p.y)),
+      ]);
+
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = pc.color;
+      ctx.strokeStyle = pc.color;
+      ctx.lineWidth = 1.5;
+
+      if (screenCoords.length === 1) {
+        // Single point — draw a circle
+        ctx.beginPath();
+        ctx.arc(screenCoords[0][0], screenCoords[0][1], 20, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.3;
+        ctx.stroke();
+      } else if (screenCoords.length === 2) {
+        // Two points — draw an ellipse between them
+        const [a, b] = screenCoords;
+        const cx = (a[0] + b[0]) / 2;
+        const cy = (a[1] + b[1]) / 2;
+        const dx = b[0] - a[0];
+        const dy = b[1] - a[1];
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, dist / 2 + 15, 15, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.3;
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        // 3+ points — convex hull
+        const hull = d3.polygonHull(screenCoords);
+        if (hull) {
+          ctx.beginPath();
+          ctx.moveTo(hull[0][0], hull[0][1]);
+          for (let i = 1; i < hull.length; i++) {
+            ctx.lineTo(hull[i][0], hull[i][1]);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 0.3;
+          ctx.stroke();
+
+          // Playlist label at centroid
+          const centroid = d3.polygonCentroid(hull);
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = pc.color;
+          ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText(pc.name, centroid[0], centroid[1]);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Draw points
     const hovered = hoveredRef.current;
     for (const point of points) {
       const color = getPointColor(point);
@@ -130,7 +212,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, xLabel, yLabel, xFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, xLabel, yLabel, xFormat]);
 
   useEffect(() => {
     const container = containerRef.current;
