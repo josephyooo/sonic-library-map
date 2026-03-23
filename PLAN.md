@@ -116,11 +116,15 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 - Genre axes: "Dense ← → Spiky" (x), "Organic ← → Electronic" (y)
 - Genre view fetched lazily on first click
 
-### Phase 7: Cluster Detection -- TODO
-- HDBSCAN on UMAP coordinates in Python sidecar (`/cluster` endpoint)
-- Identify songs clustered together but not sharing a playlist — "potential playlists"
-- Identify playlists with high intra-cluster scatter — "discordant playlists"
-- `ClusterPanel.tsx` to surface insights
+### Phase 7: Cluster Detection -- DONE
+- HDBSCAN on UMAP 2D coordinates in Python sidecar (`POST /cluster`)
+- `min_cluster_size=5`, `min_samples=3`
+- Two insight types:
+  - **Potential playlists**: clusters where tracks share no common playlist and >30% are unplaylisted
+  - **Discordant playlists**: playlists with tracks scattered across 3+ clusters (scatter ratio >50%)
+- `ClusterPanel.tsx` in sidebar (UMAP view only) — click insight to highlight its tracks on scatter plot
+- Non-highlighted points dimmed to 10% opacity for visual focus
+- Clusters auto-computed when UMAP coordinates have 20+ tracks
 
 ### Phase 8: Polish & Deploy -- TODO
 - Dark theme refinement, smooth animations, responsive layout

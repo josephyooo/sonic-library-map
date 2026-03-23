@@ -96,7 +96,7 @@ umap-service/
 
 ## Current state
 
-Phases 0 through 6 are complete: OAuth, library data fetching with caching, an interactive scatter plot with hover tooltips, click-to-open, zoom/pan, playlist color filtering, YouTube Music audio sourcing (~96% match rate), Essentia feature extraction (41-dim vector per track), UMAP dimensionality reduction with progressive updates, playlist boundary hulls, and an Every Noise genre view. A three-way view toggle switches between Release Year/Popularity, UMAP, and Genre coordinates. See [PLAN.md](PLAN.md) for upcoming phases.
+Phases 0 through 7 are complete: OAuth, library data fetching with caching, an interactive scatter plot with hover tooltips, click-to-open, zoom/pan, playlist color filtering, YouTube Music audio sourcing (~96% match rate), Essentia feature extraction (41-dim vector per track), UMAP dimensionality reduction with progressive updates, playlist boundary hulls, an Every Noise genre view, and HDBSCAN cluster detection with insights (potential playlists and discordant playlists). See [PLAN.md](PLAN.md) for upcoming phases.
 
 ## Known limitations
 
