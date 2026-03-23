@@ -43,7 +43,6 @@ export default function DashboardClient() {
   const cachedFeaturesLoaded = useRef(false);
   const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
   const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
-  const clusterFetched = useRef(false);
 
   // Auto-load cached features when UMAP is first selected
   useEffect(() => {
@@ -82,15 +81,11 @@ export default function DashboardClient() {
   // Fetch clusters when UMAP coordinates update (with enough tracks)
   useEffect(() => {
     if (!umapCoords || !libraryData) return;
-    const coordCount = Object.keys(umapCoords).length;
-    if (coordCount < 20) return;
+    if (Object.keys(umapCoords).length < 20) return;
 
-    // Only re-fetch if coords changed significantly
-    clusterFetched.current = false;
+    const controller = new AbortController();
 
     (async () => {
-      if (clusterFetched.current) return;
-      clusterFetched.current = true;
       try {
         const response = await fetch("/api/cluster", {
           method: "POST",
@@ -99,15 +94,19 @@ export default function DashboardClient() {
             coordinates: umapCoords,
             playlist_tracks: libraryData.playlistTracks,
           }),
+          signal: controller.signal,
         });
         if (response.ok) {
           const data = await response.json();
           setClusterInsights(data.insights ?? []);
         }
       } catch (err) {
+        if (controller.signal.aborted) return;
         console.error("Cluster fetch error:", err);
       }
     })();
+
+    return () => controller.abort();
   }, [umapCoords, libraryData]);
 
   const playlists = useMemo(() => {

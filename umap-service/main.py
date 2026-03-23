@@ -161,7 +161,7 @@ async def compute_umap(request: UMAPRequest):
 
 class ClusterRequest(BaseModel):
     coordinates: dict[str, list[float]]  # spotify_id -> [x, y] from UMAP
-    playlist_tracks: dict[str, list[str]]  # playlist_id -> [track_ids]
+    playlist_tracks: dict[str, list[str | None]]  # playlist_id -> [track_ids], may contain nulls
     min_cluster_size: int = 5
 
 
@@ -207,10 +207,13 @@ def _compute_clusters(
             continue  # noise
         clusters.setdefault(label, []).append(tid)
 
-    # Build reverse map: track_id -> set of playlist_ids
+    # Build reverse map: track_id -> set of playlist_ids (filter nulls)
     track_to_playlists: dict[str, set[str]] = {}
+    clean_playlist_tracks: dict[str, list[str]] = {}
     for pid, tids in playlist_tracks.items():
-        for tid in tids:
+        clean = [tid for tid in tids if tid is not None]
+        clean_playlist_tracks[pid] = clean
+        for tid in clean:
             track_to_playlists.setdefault(tid, set()).add(pid)
 
     insights: list[ClusterInsight] = []
@@ -239,7 +242,7 @@ def _compute_clusters(
             ))
 
     # 2. Discordant playlists: playlists whose tracks are scattered across many clusters
-    for pid, tids in playlist_tracks.items():
+    for pid, tids in clean_playlist_tracks.items():
         # Only consider tracks that have UMAP coordinates
         mapped_tids = [tid for tid in tids if tid in label_map]
         if len(mapped_tids) < 5:
