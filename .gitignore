@@ -53,3 +53,6 @@ next-env.d.ts
 # SQLite database files
 next-app/data/
 umap-service/data/
+
+# ML model files (download separately)
+umap-service/models/

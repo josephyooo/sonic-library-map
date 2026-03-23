@@ -7,3 +7,5 @@ hdbscan>=0.8.38
 ytmusicapi>=1.11.0
 yt-dlp>=2024.0.0
 essentia>=2.1b6
+essentia-tensorflow>=2.1b6
+tensorflow>=2.16.0
