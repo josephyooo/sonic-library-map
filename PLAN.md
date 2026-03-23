@@ -86,13 +86,15 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 
 **Gotcha discovered**: yt-dlp requires the EJS challenge solver script (`--remote-components ejs:github`) to solve YouTube's signature verification. Without it, downloads fail with "Requested format is not available." Also, the `bestaudio[abr<=128]` format filter fails when authenticated — use `bestaudio` instead.
 
-#### 4c: UMAP embedding
-- Z-score normalize feature vectors before UMAP
-- `random_state=42` for determinism
-- Cache UMAP results in SQLite (keyed by feature matrix hash)
+#### 4c: UMAP embedding -- DONE
+- Z-score normalize feature vectors (StandardScaler) before UMAP
+- `random_state=42`, `n_jobs=1` for determinism
+- Cache UMAP results in SQLite `umap_cache` table (keyed by SHA-256 hash of feature matrix)
 - Next.js `/api/umap` proxy route to Python sidecar
-- Wire coordinates into ScatterPlot, replace Release Year / Popularity axes
-- Animate transition from old to new coordinates
+- FeatureExtractor passes features to DashboardClient via callback on completion
+- DashboardClient calls `/api/umap`, updates PlotPoint x/y with UMAP coordinates
+- Scatter plot axes switch from "Release Year / Popularity" to "UMAP 1 / UMAP 2"
+- Tracks without features are filtered out in UMAP mode
 
 ### Phase 5: Playlist Boundaries -- TODO
 - Convex hulls via `d3.polygonHull` (fallback: circle for 1-2 song playlists)
