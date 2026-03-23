@@ -325,7 +325,7 @@ export default function DashboardClient() {
   }, [visiblePlaylists]);
 
   const handleClick = useCallback((point: PlotPoint) => {
-    window.open(point.track.external_urls.spotify, "_blank");
+    window.open(point.track.external_urls.spotify, "_blank", "noopener,noreferrer");
   }, []);
 
   const handleFeaturesReady = useCallback(

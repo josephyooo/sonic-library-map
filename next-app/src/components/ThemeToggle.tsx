@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export default function ThemeToggle() {
-  const [light, setLight] = useState(false);
-
-  useEffect(() => {
+  const [light, setLight] = useState(() => {
+    if (typeof window === "undefined") return false;
     const stored = localStorage.getItem("theme");
     if (stored === "light") {
-      setLight(true);
       document.documentElement.classList.add("light");
+      return true;
     }
-  }, []);
+    return false;
+  });
 
   const toggle = () => {
     setLight((prev) => {

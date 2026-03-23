@@ -57,14 +57,12 @@ export default function ScatterPlot({
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   // Precompute color lookup and visibility flag
-  const { colorMap, anyPlaylistVisible } = useMemo(() => {
+  const colorMap = useMemo(() => {
     const m = new Map<string, { color: string; visible: boolean }>();
-    let anyVisible = false;
     for (const pc of playlistColors) {
       m.set(pc.id, { color: pc.color, visible: pc.visible });
-      if (pc.visible) anyVisible = true;
     }
-    return { colorMap: m, anyPlaylistVisible: anyVisible };
+    return m;
   }, [playlistColors]);
 
   // Memoized scales (avoids O(n) d3.extent on every call)

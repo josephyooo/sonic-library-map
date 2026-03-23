@@ -102,7 +102,7 @@ export default function LibraryLoader({ onLoaded }: LibraryLoaderProps) {
     return () => abortRef.current?.abort();
   }, [fetchLibrary]);
 
-  const percentage = progress
+  const percentage = progress && progress.total > 0
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 

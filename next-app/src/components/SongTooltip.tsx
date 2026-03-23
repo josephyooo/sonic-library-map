@@ -34,6 +34,7 @@ export default function SongTooltip({ info, playlistNames, featureLabel }: SongT
       className="flex w-64 gap-3 rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-xl"
     >
       {albumArt && (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={albumArt}
           alt=""
