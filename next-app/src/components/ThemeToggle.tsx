@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function ThemeToggle() {
-  const [light, setLight] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const stored = localStorage.getItem("theme");
-    if (stored === "light") {
+  // Start false to match SSR; sync from localStorage after hydration
+  const [light, setLight] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem("theme") === "light") {
       document.documentElement.classList.add("light");
-      return true;
+      setLight(true);
     }
-    return false;
-  });
+  }, []);
 
   const toggle = () => {
     setLight((prev) => {
