@@ -71,17 +71,14 @@ export default function ScatterPlot({
   }, [points, size.height]);
 
   const getPointColor = useCallback(
-    (point: PlotPoint): string | null => {
+    (point: PlotPoint): string => {
       for (const pid of point.playlistIds) {
         const entry = colorMap.get(pid);
         if (entry?.visible) return entry.color;
       }
-      // Track is in playlists but none of its playlists are visible — hide it
-      // (only when some filter is active, otherwise show as unsaved)
-      if (point.playlistIds.length > 0 && anyPlaylistVisible) return null;
       return UNSAVED_COLOR;
     },
-    [colorMap, anyPlaylistVisible],
+    [colorMap],
   );
 
   // Group points by playlist for hull drawing
@@ -188,7 +185,6 @@ export default function ScatterPlot({
     const hovered = hoveredRef.current;
     for (const point of points) {
       const color = getPointColor(point);
-      if (!color) continue;
 
       const px = transform.applyX(xs(point.x));
       const py = transform.applyY(ys(point.y));
