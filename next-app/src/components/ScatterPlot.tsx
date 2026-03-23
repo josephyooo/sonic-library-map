@@ -26,6 +26,7 @@ interface ScatterPlotProps {
   playlistColors: PlaylistColor[];
   highlightedTracks?: Set<string> | null;
   featureColorMap?: Map<string, string> | null;
+  featureValueMap?: Map<string, number> | null;
   onHover: (info: HoveredPoint | null) => void;
   onClick: (point: PlotPoint) => void;
   xLabel: string;
@@ -45,6 +46,7 @@ export default function ScatterPlot({
   xFormat,
   highlightedTracks,
   featureColorMap,
+  featureValueMap,
 }: ScatterPlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -116,6 +118,55 @@ export default function ScatterPlot({
     ctx.fillRect(0, 0, size.width, size.height);
 
     drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat);
+
+    // Draw feature heatmap gradient when a feature overlay is active
+    if (featureValueMap && featureValueMap.size > 0) {
+      const CELL = 12; // grid cell size in pixels
+      const RADIUS = 60; // influence radius in pixels
+      const cols = Math.ceil(size.width / CELL);
+      const rows = Math.ceil(size.height / CELL);
+
+      // Collect screen-space positions with values
+      const screenPoints: { sx: number; sy: number; val: number }[] = [];
+      for (const point of points) {
+        const val = featureValueMap.get(point.id);
+        if (val === undefined) continue;
+        screenPoints.push({
+          sx: transform.applyX(xs(point.x)),
+          sy: transform.applyY(ys(point.y)),
+          val,
+        });
+      }
+
+      if (screenPoints.length > 0) {
+        for (let row = 0; row < rows; row++) {
+          for (let col = 0; col < cols; col++) {
+            const cx = col * CELL + CELL / 2;
+            const cy = row * CELL + CELL / 2;
+
+            let weightSum = 0;
+            let valSum = 0;
+            for (const sp of screenPoints) {
+              const dx = cx - sp.sx;
+              const dy = cy - sp.sy;
+              const dist2 = dx * dx + dy * dy;
+              if (dist2 > RADIUS * RADIUS) continue;
+              const w = 1 - Math.sqrt(dist2) / RADIUS;
+              weightSum += w;
+              valSum += w * sp.val;
+            }
+
+            if (weightSum > 0) {
+              const t = valSum / weightSum;
+              ctx.fillStyle = d3.interpolateTurbo(t);
+              ctx.globalAlpha = Math.min(weightSum * 0.15, 0.35);
+              ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
+            }
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
 
     // Draw playlist boundaries (convex hulls) behind points
     for (const pc of playlistColors) {
@@ -216,7 +267,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, xLabel, yLabel, xFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, featureValueMap, xLabel, yLabel, xFormat]);
 
   useEffect(() => {
     const container = containerRef.current;

@@ -225,23 +225,28 @@ export default function DashboardClient() {
     return { x: "Release Year", y: "Popularity" };
   }, [viewMode, umapAxisLabels]);
 
-  // Feature color overlay: map track ID -> color based on selected feature
-  const featureColorMap = useMemo(() => {
-    if (colorFeatureIdx === null || !trackFeatures) return null;
+  // Feature color overlay: map track ID -> color + normalized value (0-1)
+  const { featureColorMap, featureValueMap } = useMemo(() => {
+    if (colorFeatureIdx === null || !trackFeatures)
+      return { featureColorMap: null, featureValueMap: null };
     const values: { id: string; val: number }[] = [];
     for (const [id, feats] of Object.entries(trackFeatures)) {
       if (feats[colorFeatureIdx] !== undefined) {
         values.push({ id, val: feats[colorFeatureIdx] });
       }
     }
-    if (values.length === 0) return null;
+    if (values.length === 0)
+      return { featureColorMap: null, featureValueMap: null };
     const extent = d3.extent(values, (v) => v.val) as [number, number];
-    const scale = d3.scaleSequential(d3.interpolateTurbo).domain(extent);
-    const map = new Map<string, string>();
+    const colorScale = d3.scaleSequential(d3.interpolateTurbo).domain(extent);
+    const normScale = d3.scaleLinear().domain(extent).range([0, 1]);
+    const cMap = new Map<string, string>();
+    const vMap = new Map<string, number>();
     for (const { id, val } of values) {
-      map.set(id, scale(val));
+      cMap.set(id, colorScale(val));
+      vMap.set(id, normScale(val));
     }
-    return map;
+    return { featureColorMap: cMap, featureValueMap: vMap };
   }, [colorFeatureIdx, trackFeatures]);
 
   const handleToggle = useCallback((id: string) => {
@@ -342,6 +347,7 @@ export default function DashboardClient() {
           playlistColors={playlistColors}
           highlightedTracks={highlightedTracks}
           featureColorMap={featureColorMap}
+          featureValueMap={featureValueMap}
           onHover={setHovered}
           onClick={handleClick}
           xLabel={axisLabels.x}
