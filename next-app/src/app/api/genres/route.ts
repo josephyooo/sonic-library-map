@@ -1,23 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { scrapeGenreCoordinates, type GenreCoord } from "@/lib/genre-scraper";
-import { getCachedLibrary } from "@/lib/db";
+import { scrapeGenreCoordinates } from "@/lib/genre-scraper";
+import { getCachedLibrary, getCachedGenres, cacheGenres } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
-
-// In-memory cache (persists across requests within the same server process)
-let genreCache: { coords: GenreCoord[]; fetchedAt: number } | null = null;
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
-
-async function getGenreCoords(): Promise<GenreCoord[]> {
-  if (genreCache && Date.now() - genreCache.fetchedAt < CACHE_TTL_MS) {
-    return genreCache.coords;
-  }
-
-  const coords = await scrapeGenreCoordinates();
-  genreCache = { coords, fetchedAt: Date.now() };
-  return coords;
-}
 
 export async function GET() {
   const session = await getSession();
@@ -34,7 +20,11 @@ export async function GET() {
   }
 
   try {
-    const genreCoords = await getGenreCoords();
+    let genreCoords = getCachedGenres();
+    if (!genreCoords) {
+      genreCoords = await scrapeGenreCoordinates();
+      cacheGenres(genreCoords);
+    }
 
     // Build genre name → coordinate lookup
     const genreLookup = new Map<string, { x: number; y: number }>();

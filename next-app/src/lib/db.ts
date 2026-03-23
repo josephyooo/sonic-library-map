@@ -32,6 +32,13 @@ function initTables(db: Database.Database) {
       fetched_at INTEGER NOT NULL
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS genre_cache (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      genres TEXT NOT NULL,
+      fetched_at INTEGER NOT NULL
+    );
+  `);
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -65,6 +72,29 @@ export function getCachedLibrary(userId: string): LibraryData | null {
     artists: JSON.parse(row.artists),
     fetchedAt: row.fetched_at,
   };
+}
+
+import type { GenreCoord } from "./genre-scraper";
+
+const GENRE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+
+export function getCachedGenres(): GenreCoord[] | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT genres, fetched_at FROM genre_cache WHERE id = 1")
+    .get() as { genres: string; fetched_at: number } | undefined;
+
+  if (!row) return null;
+  if (Date.now() - row.fetched_at > GENRE_CACHE_TTL_MS) return null;
+
+  return JSON.parse(row.genres);
+}
+
+export function cacheGenres(genres: GenreCoord[]): void {
+  const db = getDb();
+  db.prepare(
+    "INSERT OR REPLACE INTO genre_cache (id, genres, fetched_at) VALUES (1, ?, ?)",
+  ).run(JSON.stringify(genres), Date.now());
 }
 
 export function cacheLibrary(userId: string, data: LibraryData) {
