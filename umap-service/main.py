@@ -200,6 +200,7 @@ async def run_feature_extraction(request: FeaturesRequest):
                         "total": total,
                         "extracted": extracted,
                         "failed": failed,
+                        "feature": {track.spotify_id: cached},
                     })
                     continue
 
@@ -242,6 +243,15 @@ async def run_feature_extraction(request: FeaturesRequest):
                         cache_features, track.spotify_id, features
                     )
                     extracted += 1
+                    yield send({
+                        "type": "progress",
+                        "message": f"Extracted: {track.name}",
+                        "current": i + 1,
+                        "total": total,
+                        "extracted": extracted,
+                        "failed": failed,
+                        "feature": {track.spotify_id: features},
+                    })
                 else:
                     failed += 1
 

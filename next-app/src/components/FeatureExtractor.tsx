@@ -3,6 +3,8 @@
 import { useState, useCallback, useRef } from "react";
 import type { LibraryData } from "@/lib/types";
 
+const UMAP_UPDATE_INTERVAL = 10;
+
 interface Progress {
   message: string;
   current: number;
@@ -39,13 +41,12 @@ export default function FeatureExtractor({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Build track list from library data
     const tracks = libraryData.tracks.map((t) => ({
-      spotify_id: t.id,
-      name: t.name,
-      artist: t.artists[0]?.name ?? "Unknown",
-      duration_ms: t.duration_ms,
-    }));
+        spotify_id: t.id,
+        name: t.name,
+        artist: t.artists[0]?.name ?? "Unknown",
+        duration_ms: t.duration_ms,
+      }));
 
     try {
       const response = await fetch("/api/features", {
@@ -65,6 +66,8 @@ export default function FeatureExtractor({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      const accumulated: Record<string, number[]> = {};
+      let lastUpdateCount = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -88,14 +91,33 @@ export default function FeatureExtractor({
               extracted: data.extracted,
               failed: data.failed,
             });
+
+            // Accumulate features from progress events
+            if (data.feature) {
+              Object.assign(accumulated, data.feature);
+            }
+
+            // Trigger UMAP update every N extracted tracks
+            const count = Object.keys(accumulated).length;
+            if (
+              count >= 5 &&
+              count - lastUpdateCount >= UMAP_UPDATE_INTERVAL
+            ) {
+              lastUpdateCount = count;
+              onFeaturesReady({ ...accumulated });
+            }
           } else if (data.type === "complete") {
             setResult({
               extracted: data.extracted,
               failed: data.failed,
               total: data.total,
             });
-            if (data.features && Object.keys(data.features).length > 0) {
-              onFeaturesReady(data.features);
+            // Final update with all features
+            if (data.features) {
+              Object.assign(accumulated, data.features);
+            }
+            if (Object.keys(accumulated).length > 0) {
+              onFeaturesReady({ ...accumulated });
             }
           }
         }

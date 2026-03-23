@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import type { LibraryData, PlotPoint } from "@/lib/types";
 import LibraryLoader from "@/components/LibraryLoader";
 import ScatterPlot, {
@@ -33,6 +33,7 @@ export default function DashboardClient() {
   >({});
   const [umapCoords, setUmapCoords] = useState<Record<string, [number, number]> | null>(null);
   const [umapLoading, setUmapLoading] = useState(false);
+  const umapAbortRef = useRef<AbortController | null>(null);
 
   const playlists = useMemo(() => {
     if (!libraryData) return [];
@@ -112,6 +113,12 @@ export default function DashboardClient() {
   const handleFeaturesReady = useCallback(
     async (features: Record<string, number[]>) => {
       if (!libraryData) return;
+
+      // Abort any in-flight UMAP request
+      umapAbortRef.current?.abort();
+      const controller = new AbortController();
+      umapAbortRef.current = controller;
+
       setUmapLoading(true);
       try {
         const trackIds = libraryData.tracks.map((t) => t.id);
@@ -119,14 +126,20 @@ export default function DashboardClient() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ track_ids: trackIds, features }),
+          signal: controller.signal,
         });
         if (!response.ok) throw new Error(`UMAP failed: ${response.status}`);
         const data = await response.json();
-        setUmapCoords(data.coordinates);
+        if (!controller.signal.aborted) {
+          setUmapCoords(data.coordinates);
+        }
       } catch (err) {
+        if (controller.signal.aborted) return;
         console.error("UMAP error:", err);
       } finally {
-        setUmapLoading(false);
+        if (!controller.signal.aborted) {
+          setUmapLoading(false);
+        }
       }
     },
     [libraryData],
