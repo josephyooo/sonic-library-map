@@ -1,23 +1,30 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
-import tempfile
+import subprocess
+import sys
 
-from fastapi import FastAPI
+import numpy as np
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from ytmusicapi import YTMusic
 
 from audio_source import (
     TrackQuery,
+    cache_embedding,
     cache_features,
+    get_all_cached_embeddings,
     get_all_cached_features,
+    get_cached_embedding,
     get_cached_features,
     get_cached_match,
     search_and_download,
 )
 from feature_extract import extract_features
+from tf_extract import extract_embedding
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,6 +57,7 @@ async def health():
 class UMAPRequest(BaseModel):
     track_ids: list[str]
     features: dict[str, list[float]]
+    raw_features: dict[str, list[float]] | None = None
     n_neighbors: int = 15
     min_dist: float = 0.1
 
@@ -70,18 +78,15 @@ class UMAPResponse(BaseModel):
 def _compute_umap(
     track_ids: list[str],
     features: dict[str, list[float]],
+    raw_features: dict[str, list[float]] | None,
     n_neighbors: int,
     min_dist: float,
 ) -> UMAPResponse:
-    import hashlib
-    import numpy as np
-    from sklearn.preprocessing import StandardScaler
-    from umap import UMAP
     from feature_extract import AXIS_FEATURE_NAMES
 
     # Filter to tracks that have features
     valid_ids = [tid for tid in track_ids if tid in features]
-    if len(valid_ids) < 2:
+    if len(valid_ids) < 5:
         return UMAPResponse(coordinates={})
 
     matrix = np.array([features[tid] for tid in valid_ids], dtype=np.float64)
@@ -92,35 +97,93 @@ def _compute_umap(
     if cached is not None:
         return UMAPResponse(coordinates=cached)
 
-    # Z-score normalize
-    scaler = StandardScaler()
-    normalized = scaler.fit_transform(matrix)
+    # Run PCA + UMAP in a subprocess to avoid numba/TF mutex conflict
+    coords_list = _run_umap_subprocess(matrix, n_neighbors, min_dist)
 
-    # Replace any NaN/inf from constant features with 0
-    normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
-
-    # Clamp n_neighbors to valid range
-    effective_neighbors = min(n_neighbors, len(valid_ids) - 1)
-    if effective_neighbors < 2:
-        effective_neighbors = 2
-
-    reducer = UMAP(
-        n_components=2,
-        n_neighbors=effective_neighbors,
-        min_dist=min_dist,
-        random_state=42,
-        n_jobs=1,
-    )
-    coords = reducer.fit_transform(normalized)
-
-    coordinates = {tid: coords[i].tolist() for i, tid in enumerate(valid_ids)}
+    coordinates = {tid: coords_list[i] for i, tid in enumerate(valid_ids)}
     _cache_umap(cache_key, coordinates)
 
-    # Compute axis correlations against original (unnormalized) features
-    x_axis = _best_axis_correlation(matrix, coords[:, 0], AXIS_FEATURE_NAMES)
-    y_axis = _best_axis_correlation(matrix, coords[:, 1], AXIS_FEATURE_NAMES)
+    # Compute axis correlations using raw features (interpretable dimensions)
+    x_axis = None
+    y_axis = None
+    if raw_features:
+        raw_ids = [tid for tid in valid_ids if tid in raw_features]
+        if len(raw_ids) > 10:
+            raw_matrix = np.array([raw_features[tid] for tid in raw_ids], dtype=np.float64)
+            raw_coords_x = np.array([coordinates[tid][0] for tid in raw_ids])
+            raw_coords_y = np.array([coordinates[tid][1] for tid in raw_ids])
+            x_axis = _best_axis_correlation(raw_matrix, raw_coords_x, AXIS_FEATURE_NAMES)
+            y_axis = _best_axis_correlation(raw_matrix, raw_coords_y, AXIS_FEATURE_NAMES)
 
     return UMAPResponse(coordinates=coordinates, x_axis=x_axis, y_axis=y_axis)
+
+
+def _run_umap_subprocess(matrix: np.ndarray, n_neighbors: int, min_dist: float) -> list[list[float]]:
+    """Run PCA + UMAP in a subprocess to isolate numba from TensorFlow."""
+    script = """
+import sys, json, numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from umap import UMAP
+
+data = json.loads(sys.stdin.read())
+matrix = np.array(data["matrix"], dtype=np.float64)
+n_neighbors = data["n_neighbors"]
+min_dist = data["min_dist"]
+
+normalized = StandardScaler().fit_transform(matrix)
+normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
+
+if normalized.shape[1] > 50:
+    n_comp = min(50, normalized.shape[0] - 1)
+    normalized = PCA(n_components=n_comp, random_state=42).fit_transform(normalized)
+
+eff_neighbors = max(2, min(n_neighbors, matrix.shape[0] - 1))
+coords = UMAP(n_components=2, n_neighbors=eff_neighbors, min_dist=min_dist, random_state=42, n_jobs=1).fit_transform(normalized)
+print(json.dumps(coords.tolist()))
+"""
+    input_data = json.dumps({
+        "matrix": matrix.tolist(),
+        "n_neighbors": n_neighbors,
+        "min_dist": min_dist,
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=input_data,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"UMAP subprocess failed: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def _run_hdbscan_subprocess(matrix: np.ndarray, min_cluster_size: int) -> list[int]:
+    """Run HDBSCAN in a subprocess to isolate numba from TensorFlow."""
+    script = """
+import sys, json, numpy as np
+from hdbscan import HDBSCAN
+
+data = json.loads(sys.stdin.read())
+matrix = np.array(data["matrix"], dtype=np.float64)
+labels = HDBSCAN(min_cluster_size=data["min_cluster_size"], min_samples=3).fit_predict(matrix)
+print(json.dumps(labels.tolist()))
+"""
+    input_data = json.dumps({
+        "matrix": matrix.tolist(),
+        "min_cluster_size": min_cluster_size,
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=input_data,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"HDBSCAN subprocess failed: {result.stderr}")
+    return json.loads(result.stdout)
 
 
 # Direction hints for named features (low → high)
@@ -148,7 +211,6 @@ def _best_axis_correlation(
     axis_coords: "np.ndarray",
     names: list[str],
 ) -> AxisLabel | None:
-    import numpy as np
 
     best_name = ""
     best_r = 0.0
@@ -221,6 +283,7 @@ async def compute_umap(request: UMAPRequest):
         _compute_umap,
         request.track_ids,
         request.features,
+        request.raw_features,
         request.n_neighbors,
         request.min_dist,
     )
@@ -253,8 +316,6 @@ def _compute_clusters(
     playlist_tracks: dict[str, list[str]],
     min_cluster_size: int,
 ) -> ClusterResponse:
-    import numpy as np
-    from hdbscan import HDBSCAN
 
     track_ids = list(coordinates.keys())
     if len(track_ids) < min_cluster_size:
@@ -262,13 +323,9 @@ def _compute_clusters(
 
     matrix = np.array([coordinates[tid] for tid in track_ids], dtype=np.float64)
 
-    clusterer = HDBSCAN(
-        min_cluster_size=min_cluster_size,
-        min_samples=3,
-    )
-    labels = clusterer.fit_predict(matrix)
+    labels_list = _run_hdbscan_subprocess(matrix, min_cluster_size)
 
-    label_map = {tid: int(labels[i]) for i, tid in enumerate(track_ids)}
+    label_map = {tid: labels_list[i] for i, tid in enumerate(track_ids)}
 
     # Build reverse map: cluster_id -> set of track_ids
     clusters: dict[int, list[str]] = {}
@@ -359,9 +416,14 @@ async def compute_clusters(request: ClusterRequest):
 
 @app.get("/features")
 async def get_cached():
-    """Return all cached feature vectors without running extraction."""
-    all_features = await asyncio.to_thread(get_all_cached_features)
-    return {"features": all_features, "count": len(all_features)}
+    """Return all cached TF embeddings (for UMAP) and raw features (for overlay)."""
+    all_embeddings = await asyncio.to_thread(get_all_cached_embeddings)
+    all_raw = await asyncio.to_thread(get_all_cached_features)
+    return {
+        "features": all_embeddings,
+        "raw_features": all_raw,
+        "count": len(all_embeddings),
+    }
 
 
 # ─── Audio sourcing (Phase 4a) ──────────────────────────────────────────────
@@ -379,11 +441,10 @@ class FeaturesRequest(BaseModel):
 
 
 @app.post("/features")
-async def run_feature_extraction(request: FeaturesRequest):
+async def run_feature_extraction(body: FeaturesRequest, request: Request):
     """Search YouTube Music, download audio, extract Essentia features, cache results.
 
     Returns SSE stream with progress events and final results.
-    Audio files are deleted immediately after feature extraction.
     """
 
     async def generate():
@@ -391,93 +452,115 @@ async def run_feature_extraction(request: FeaturesRequest):
             return f"data: {json.dumps(obj)}\n\n"
 
         yt = get_yt()
-        total = len(request.tracks)
+        total = len(body.tracks)
         extracted = 0
         failed = 0
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            for i, track in enumerate(request.tracks):
-                # Skip if we already have cached features
-                cached = await asyncio.to_thread(get_cached_features, track.spotify_id)
-                if cached is not None:
-                    extracted += 1
-                    yield send({
-                        "type": "progress",
-                        "message": f"Cached: {track.name}",
-                        "current": i + 1,
-                        "total": total,
-                        "extracted": extracted,
-                        "failed": failed,
-                        "feature": {track.spotify_id: cached},
-                    })
-                    continue
-
-                query = TrackQuery(
-                    spotify_id=track.spotify_id,
-                    name=track.name,
-                    artist=track.artist,
-                    duration_ms=track.duration_ms,
-                )
-
+        for i, track in enumerate(body.tracks):
+            # Stop if client disconnected
+            if await request.is_disconnected():
+                logger.info("Client disconnected, stopping extraction at %d/%d", i, total)
+                return
+            # Skip if we already have cached TF embedding
+            cached_emb = await asyncio.to_thread(get_cached_embedding, track.spotify_id)
+            if cached_emb is not None:
+                extracted += 1
                 yield send({
                     "type": "progress",
-                    "message": f"Processing: {track.name} — {track.artist}",
+                    "message": f"Cached: {track.name}",
                     "current": i + 1,
                     "total": total,
                     "extracted": extracted,
                     "failed": failed,
+                    "feature": {track.spotify_id: cached_emb},
                 })
+                continue
 
-                # Search + download
-                result = await asyncio.to_thread(
-                    search_and_download, yt, query, tmpdir
-                )
+            query = TrackQuery(
+                spotify_id=track.spotify_id,
+                name=track.name,
+                artist=track.artist,
+                duration_ms=track.duration_ms,
+            )
 
-                if result is None:
-                    failed += 1
-                    continue
-
-                # Extract features with Essentia
-                features = await asyncio.to_thread(
-                    extract_features, result.file_path
-                )
-
-                # Delete audio immediately
-                if os.path.exists(result.file_path):
-                    os.remove(result.file_path)
-
-                if features is not None:
-                    await asyncio.to_thread(
-                        cache_features, track.spotify_id, features
-                    )
-                    extracted += 1
-                    yield send({
-                        "type": "progress",
-                        "message": f"Extracted: {track.name}",
-                        "current": i + 1,
-                        "total": total,
-                        "extracted": extracted,
-                        "failed": failed,
-                        "feature": {track.spotify_id: features},
-                    })
-                else:
-                    failed += 1
-
-            # Return summary with all cached features
-            all_features = await asyncio.to_thread(get_all_cached_features)
             yield send({
-                "type": "complete",
+                "type": "progress",
+                "message": f"Processing: {track.name} — {track.artist}",
+                "current": i + 1,
+                "total": total,
                 "extracted": extracted,
                 "failed": failed,
-                "total": total,
-                "cached_total": len(all_features),
-                "features": all_features,
             })
+
+            # Search + download (persistent directory, checks cache)
+            result = await asyncio.to_thread(
+                search_and_download, yt, query
+            )
+
+            if result is None:
+                failed += 1
+                continue
+
+            # Extract TF embedding (for UMAP)
+            embedding = await asyncio.to_thread(
+                extract_embedding, result.file_path
+            )
+
+            # Extract raw features (for "Color by" overlay) — non-critical
+            raw_features = await asyncio.to_thread(
+                extract_features, result.file_path
+            )
+
+            if embedding is not None:
+                await asyncio.to_thread(
+                    cache_embedding, track.spotify_id, embedding
+                )
+                if raw_features is not None:
+                    await asyncio.to_thread(
+                        cache_features, track.spotify_id, raw_features
+                    )
+                extracted += 1
+                yield send({
+                    "type": "progress",
+                    "message": f"Extracted: {track.name}",
+                    "current": i + 1,
+                    "total": total,
+                    "extracted": extracted,
+                    "failed": failed,
+                    "feature": {track.spotify_id: embedding},
+                })
+            else:
+                failed += 1
+
+        # Return summary with all cached embeddings
+        all_embeddings = await asyncio.to_thread(get_all_cached_embeddings)
+        yield send({
+            "type": "complete",
+            "extracted": extracted,
+            "failed": failed,
+            "total": total,
+            "cached_total": len(all_embeddings),
+            "features": all_embeddings,
+        })
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 # ─── Query cached matches ───────────────────────────────────────────────────
+
+
+@app.get("/downloads")
+async def list_downloads():
+    """Return all cached audio downloads with file status (debug endpoint)."""
+    from audio_source import get_all_downloads
+    downloads = await asyncio.to_thread(get_all_downloads)
+    total_size = sum(d["file_size"] for d in downloads if d["exists"])
+    return {
+        "downloads": downloads,
+        "count": len(downloads),
+        "on_disk": sum(1 for d in downloads if d["exists"]),
+        "total_size_mb": round(total_size / (1024 * 1024), 1),
+    }
 
 
 @app.get("/matches")
