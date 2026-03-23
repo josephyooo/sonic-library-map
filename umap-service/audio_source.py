@@ -22,6 +22,7 @@ from ytmusicapi import YTMusic
 logger = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("FEATURES_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "features.db"))
+AUDIO_DIR = os.environ.get("AUDIO_DIR", os.path.join(os.path.dirname(__file__), "data", "audio"))
 
 
 @dataclass
@@ -68,6 +69,22 @@ def _get_db() -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS audio_features (
             spotify_id TEXT PRIMARY KEY,
             features TEXT NOT NULL,
+            FOREIGN KEY (spotify_id) REFERENCES youtube_matches(spotify_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tf_embeddings (
+            spotify_id TEXT PRIMARY KEY,
+            embedding TEXT NOT NULL,
+            FOREIGN KEY (spotify_id) REFERENCES youtube_matches(spotify_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS downloads (
+            spotify_id TEXT PRIMARY KEY,
+            video_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (spotify_id) REFERENCES youtube_matches(spotify_id)
         )
     """)
@@ -133,6 +150,38 @@ def get_all_cached_features() -> dict[str, list[float]]:
     return {row[0]: json.loads(row[1]) for row in rows}
 
 
+# ─── TF Embedding Cache ─────────────────────────────────────────────────────
+
+
+def get_cached_embedding(spotify_id: str) -> list[float] | None:
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT embedding FROM tf_embeddings WHERE spotify_id = ?",
+        (spotify_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return json.loads(row[0])
+
+
+def cache_embedding(spotify_id: str, embedding: list[float]) -> None:
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO tf_embeddings (spotify_id, embedding) VALUES (?, ?)",
+        (spotify_id, json.dumps(embedding)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_all_cached_embeddings() -> dict[str, list[float]]:
+    conn = _get_db()
+    rows = conn.execute("SELECT spotify_id, embedding FROM tf_embeddings").fetchall()
+    conn.close()
+    return {row[0]: json.loads(row[1]) for row in rows}
+
+
 # ─── YouTube Music Search ────────────────────────────────────────────────────
 
 def _parse_duration(duration_str: str) -> int:
@@ -187,6 +236,56 @@ def search_track(yt: YTMusic, query: TrackQuery, duration_tolerance_s: int = 5) 
     return None
 
 
+# ─── Download Cache ──────────────────────────────────────────────────────────
+
+
+def get_cached_download(spotify_id: str) -> str | None:
+    """Return cached file path if the file still exists on disk."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT file_path FROM downloads WHERE spotify_id = ?", (spotify_id,)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    if os.path.exists(row[0]):
+        return row[0]
+    # File was deleted — remove stale record
+    _remove_download_record(spotify_id)
+    return None
+
+
+def cache_download(spotify_id: str, video_id: str, file_path: str) -> None:
+    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO downloads (spotify_id, video_id, file_path, file_size) VALUES (?, ?, ?, ?)",
+        (spotify_id, video_id, file_path, file_size),
+    )
+    conn.commit()
+    conn.close()
+
+
+def _remove_download_record(spotify_id: str) -> None:
+    conn = _get_db()
+    conn.execute("DELETE FROM downloads WHERE spotify_id = ?", (spotify_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_all_downloads() -> list[dict]:
+    """Return all download records (for debugging)."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT spotify_id, video_id, file_path, file_size FROM downloads"
+    ).fetchall()
+    conn.close()
+    return [
+        {"spotify_id": r[0], "video_id": r[1], "file_path": r[2], "file_size": r[3], "exists": os.path.exists(r[2])}
+        for r in rows
+    ]
+
+
 # ─── yt-dlp Download ─────────────────────────────────────────────────────────
 
 def download_audio(video_id: str, output_dir: str) -> str | None:
@@ -218,22 +317,40 @@ def download_audio(video_id: str, output_dir: str) -> str | None:
 def search_and_download(
     yt: YTMusic,
     query: TrackQuery,
-    output_dir: str,
 ) -> DownloadResult | None:
     """Search for a track on YouTube Music, download if found.
 
-    Checks cache first. Returns None if no match or download fails.
+    Checks download cache and match cache first. Downloads to persistent
+    AUDIO_DIR so files can be reused across extraction runs.
+    Returns None if no match or download fails.
     """
-    # Check cache
+    # Check if we already have the file on disk
+    cached_path = get_cached_download(query.spotify_id)
+    if cached_path is not None:
+        match = get_cached_match(query.spotify_id)
+        if match is not None:
+            logger.info("Using cached download for %s: %s", query.name, cached_path)
+            return DownloadResult(
+                spotify_id=query.spotify_id,
+                video_id=match.video_id,
+                file_path=cached_path,
+                duration_s=match.duration_s,
+            )
+
+    # Search for match
     match = get_cached_match(query.spotify_id)
     if match is None:
         match = search_track(yt, query)
     if match is None:
         return None
 
-    file_path = download_audio(match.video_id, output_dir)
+    # Download to persistent directory
+    os.makedirs(AUDIO_DIR, exist_ok=True)
+    file_path = download_audio(match.video_id, AUDIO_DIR)
     if file_path is None:
         return None
+
+    cache_download(query.spotify_id, match.video_id, file_path)
 
     return DownloadResult(
         spotify_id=query.spotify_id,
