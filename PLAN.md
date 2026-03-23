@@ -91,10 +91,13 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 - `random_state=42`, `n_jobs=1` for determinism
 - Cache UMAP results in SQLite `umap_cache` table (keyed by SHA-256 hash of feature matrix)
 - Next.js `/api/umap` proxy route to Python sidecar
-- FeatureExtractor passes features to DashboardClient via callback on completion
+- FeatureExtractor passes features to DashboardClient via callback every 10 tracks
 - DashboardClient calls `/api/umap`, updates PlotPoint x/y with UMAP coordinates
-- Scatter plot axes switch from "Release Year / Popularity" to "UMAP 1 / UMAP 2"
-- Tracks without features are filtered out in UMAP mode
+- Scatter plot axes switch to "UMAP 1 / UMAP 2"; empty plot shown when no features yet (no Year/Pop fallback)
+- `GET /api/features` returns cached features — UMAP auto-loads from cache on first view switch
+- Extract button only appears in UMAP mode; says "Resume extraction" when cached results exist
+- Progress bar visible regardless of view mode while extraction runs
+- Playlist sidebar filtered to only playlists with tracks in the current view
 
 ### Phase 5: Playlist Boundaries -- DONE
 - Convex hulls via `d3.polygonHull` drawn behind points in `draw()`
@@ -102,11 +105,12 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 - Semi-transparent colored polygons (8% fill, 30% stroke) using playlist color
 - Playlist labels at hull centroids (10px, 50% opacity)
 - Toggle visibility per playlist (wired through existing PlaylistLegend)
+- Toggling a playlist off only changes its color/hull — songs are never hidden (shown as gray)
 
 ### Phase 6: Every Noise Genre View -- DONE
 - `lib/genre-scraper.ts` — scrape everynoise.com HTML with `cheerio`, extract genre coordinates from `<div class="genre">` inline styles (top/left px) and genre names from `playx()` onclick
 - Coordinates normalized to [0, 1] from canvas pixel positions (1610×~22000px)
-- `/api/genres` route: scrape (or return in-memory cached, 1-week TTL), map tracks to genre coordinates by averaging their artists' genre positions
+- `/api/genres` route: scrape (or return SQLite-cached, 1-week TTL), map tracks to genre coordinates by averaging their artists' genre positions
 - 555/907 tracks mapped (those with artists that have matching genres on Every Noise)
 - `ViewToggle.tsx` — three-way toggle: Year/Pop, UMAP, Genre
 - Genre axes: "Dense ← → Spiky" (x), "Organic ← → Electronic" (y)

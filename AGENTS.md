@@ -78,6 +78,10 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - Library data is fetched via SSE from `/api/library` and consumed by `LibraryLoader.tsx`.
 - Once loaded, `DashboardClient.tsx` transforms raw `LibraryData` into `PlotPoint[]` for the scatter plot.
 - Playlist-to-track membership is a reverse lookup map built in `DashboardClient`.
+- Three view modes (Year/Pop, UMAP, Genre) controlled by `ViewToggle.tsx`. Each has its own coordinate set; switching views swaps `activeCoords` which drives point positions and playlist filtering.
+- UMAP view auto-loads cached features via `GET /api/features` on first switch. Extract button only shown in UMAP mode.
+- Genre view fetches lazily via `GET /api/genres` (SQLite-cached, 1-week TTL). Tracks mapped by averaging their artists' genre coordinates from Every Noise.
+- Toggling playlists controls color/hull visibility only — songs are never hidden, only grayed out.
 
 ## Domain knowledge
 
