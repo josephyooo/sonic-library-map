@@ -72,32 +72,37 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 
 **Gotcha discovered**: Synchronous blocking calls (ytmusicapi search, yt-dlp download) inside an async SSE generator block uvicorn's event loop, preventing SSE events from flushing. Must use `asyncio.to_thread()` for all blocking I/O.
 
-#### 4b: Essentia feature extraction -- DONE
-- `feature_extract.py` — 41-dimensional feature vector per track:
-  - MFCC mean + std (26 dims) — timbre
-  - Spectral centroid, rolloff, flatness (3 dims) — brightness/texture
-  - BPM, beat confidence (2 dims) — rhythm
-  - Key, scale, key strength (3 dims) — tonality
-  - Integrated loudness, loudness range, dynamic complexity (3 dims) — dynamics
-  - Danceability, energy (log-scaled), RMS, zero crossing rate (4 dims) — groove/power
-- Features cached indefinitely in SQLite `audio_features` table (keyed by Spotify track ID)
-- Audio files deleted immediately after extraction
-- yt-dlp uses Chrome cookies + EJS challenge solver for YouTube authentication
+#### 4b: Essentia feature extraction -- PIVOTING
+
+**Original approach (41-dim raw features)**: MFCCs (26), spectral (3), rhythm (2), tonality (3), dynamics (3), groove/power (4). Produced nonsensical UMAP clusters because MFCCs dominated the vector and raw spectral features aren't perceptually meaningful.
+
+**New approach (Discogs-EffNet embeddings)**: Use Essentia's TensorFlow model `discogs-effnet-bs64-1` to extract a 2048-dimensional embedding per track. This model was trained on millions of tracks to capture genre, style, mood, and instrumentation — songs that sound alike have similar embeddings. UMAP on this should produce clusters like "indie folk", "electronic dance", "orchestral" instead of noise.
+
+Implementation:
+- Install `essentia-tensorflow` in conda env
+- Download Discogs-EffNet model (~20MB)
+- New extraction function: MonoLoader → mel spectrogram → TensorflowPredictEffnetDiscogs → embedding
+- Store TF embeddings in a **separate** SQLite table `tf_embeddings` (keyed by Spotify track ID) — doesn't invalidate existing raw features
+- Re-download audio for tracks missing TF embeddings (YouTube links already cached from 4a)
+- UMAP input switches from 41-dim raw features to 2048-dim TF embeddings
+- Optionally retain raw features for the "Color by" overlay (BPM, loudness, etc. are still useful for exploration)
 
 **Gotcha discovered**: yt-dlp requires the EJS challenge solver script (`--remote-components ejs:github`) to solve YouTube's signature verification. Without it, downloads fail with "Requested format is not available." Also, the `bestaudio[abr<=128]` format filter fails when authenticated — use `bestaudio` instead.
 
-#### 4c: UMAP embedding -- DONE
+#### 4c: UMAP embedding -- DONE (will re-run with TF embeddings)
 - Z-score normalize feature vectors (StandardScaler) before UMAP
 - `random_state=42`, `n_jobs=1` for determinism
-- Cache UMAP results in SQLite `umap_cache` table (keyed by SHA-256 hash of feature matrix)
+- Cache UMAP results in SQLite `umap_cache` table (keyed by SHA-256 hash of feature matrix) — cache auto-invalidates when features change
 - Next.js `/api/umap` proxy route to Python sidecar
 - FeatureExtractor passes features to DashboardClient via callback every 10 tracks
 - DashboardClient calls `/api/umap`, updates PlotPoint x/y with UMAP coordinates
-- Scatter plot axes switch to "UMAP 1 / UMAP 2"; empty plot shown when no features yet (no Year/Pop fallback)
+- Correlation-based axis labels (e.g., "Soft ← → Loud") instead of "UMAP 1 / UMAP 2"
+- Scatter plot shows empty plot when no features yet (no Year/Pop fallback)
 - `GET /api/features` returns cached features — UMAP auto-loads from cache on first view switch
 - Extract button only appears in UMAP mode; says "Resume extraction" when cached results exist
 - Progress bar visible regardless of view mode while extraction runs
 - Playlist sidebar filtered to only playlists with tracks in the current view
+- Feature color overlay ("Color by" selector) for BPM, danceability, loudness, etc. with Turbo heatmap gradient
 
 ### Phase 5: Playlist Boundaries -- DONE
 - Convex hulls via `d3.polygonHull` drawn behind points in `draw()`
@@ -153,6 +158,7 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 | D3 + React DOM conflict | `useRef` + `useEffect` pattern; D3 binds to Canvas, React doesn't touch it |
 | Canvas hit-testing (no DOM events on circles) | `d3.quadtree` for O(log n) nearest-point lookup on mousemove |
 | Convex hull with \<3 points or collinear points | Fallback to circle; handle `d3.polygonHull` returning null |
+| Raw spectral features produce nonsensical UMAP clusters | Pivot to Discogs-EffNet TF embeddings (2048-dim learned musical similarity) instead of 41-dim MFCCs/spectral |
 | UMAP non-determinism | Fixed `random_state=42` |
 | Every Noise site changes | Defensive scraper with graceful degradation |
 | Essentia + native deps on ARM | Include `gcc`, `python3-dev`, `ffmpeg`, and Essentia system deps in Dockerfile |

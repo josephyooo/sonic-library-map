@@ -60,7 +60,11 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - If a track can't be found or downloaded, skip it gracefully. UMAP handles incomplete data.
 - **yt-dlp requires Chrome cookies** (`cookiesfrombrowser: ('chrome',)`) and the **EJS challenge solver** (`yt-dlp --remote-components ejs:github --skip-download URL`) for YouTube authentication. Without EJS, downloads fail.
 - Use `bestaudio` format — the `bestaudio[abr<=128]` filter fails when authenticated with cookies.
-- Essentia extraction produces a **41-dimensional feature vector** per track (MFCCs, spectral, rhythm, tonal, dynamics). See `feature_extract.py` docstring for the full breakdown.
+- **Two types of Essentia features are extracted**:
+  1. **Raw features** (41-dim): MFCCs, spectral, rhythm, tonal, dynamics — stored in `audio_features` table. Used for "Color by" overlay (BPM, loudness, etc.) but NOT for UMAP.
+  2. **TF embeddings** (2048-dim): Discogs-EffNet model output — stored in `tf_embeddings` table. Used as UMAP input. Captures learned genre/style/mood similarity.
+- Raw spectral features (MFCCs) produce nonsensical UMAP clusters. Always use TF embeddings for dimensionality reduction.
+- The Discogs-EffNet model file must be downloaded separately (~20MB) and placed in `umap-service/models/`.
 - All blocking I/O in the sidecar (ytmusicapi search, yt-dlp download, Essentia extraction) must use `asyncio.to_thread()` to avoid blocking uvicorn's event loop.
 
 ### Caching

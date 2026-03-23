@@ -11,7 +11,7 @@ An interactive web app that plots your entire Spotify library as a scatter plot,
 | Auth | Spotify OAuth 2.0 + `iron-session` encrypted cookies |
 | Database | SQLite via `better-sqlite3` (WAL mode, 24h cache TTL) |
 | Rate limiting | `p-queue` (concurrency 10, 25 req/sec) |
-| Audio analysis | [Essentia](https://essentia.upf.edu) (feature extraction from audio) |
+| Audio analysis | [Essentia](https://essentia.upf.edu) + Discogs-EffNet TF model (learned musical embeddings) |
 | Audio sourcing | [ytmusicapi](https://github.com/sigma67/ytmusicapi) (search) + `yt-dlp` (download) |
 | ML sidecar | FastAPI + `umap-learn` + `hdbscan` + Essentia (Python 3.11) |
 | Deployment | Docker Compose on Oracle Cloud VPS behind Cloudflare tunnel |
@@ -96,13 +96,13 @@ umap-service/
 
 ## Current state
 
-Phases 0 through 7 are complete: OAuth, library data fetching with caching, an interactive scatter plot with hover tooltips, click-to-open, zoom/pan, playlist color filtering, YouTube Music audio sourcing (~96% match rate), Essentia feature extraction (41-dim vector per track), UMAP dimensionality reduction with progressive updates, playlist boundary hulls, an Every Noise genre view, and HDBSCAN cluster detection with insights (potential playlists and discordant playlists). See [PLAN.md](PLAN.md) for upcoming phases.
+Phases 0 through 7 are complete. Currently pivoting feature extraction (Phase 4b) from raw spectral features (41-dim MFCCs) to Discogs-EffNet TF embeddings (2048-dim learned musical similarity) for dramatically better UMAP clustering. The pipeline, UI, and all other phases are fully functional. See [PLAN.md](PLAN.md) for details.
 
 ## Known limitations
 
 - **Spotify audio features unavailable**: Spotify deprecated the `/audio-features` endpoint for new apps in November 2024, and `preview_url` returns null for all tracks. Audio features are instead extracted via YouTube Music (search with ytmusicapi → download with yt-dlp → analyze with Essentia). Audio files are discarded after processing.
 - **YouTube Music browser auth expires**: The ytmusicapi browser auth cookies need periodic re-authentication.
-- **Scatter plot axes are temporary**: Release Year vs. Popularity are placeholder axes until UMAP coordinates replace them.
+- **Feature extraction pivot in progress**: Raw 41-dim spectral features produced poor UMAP clusters. Switching to Discogs-EffNet TF embeddings (2048-dim) for perceptually meaningful similarity. Requires re-downloading audio for existing tracks (YouTube links are cached).
 
 ## License
 
