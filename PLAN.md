@@ -9,7 +9,9 @@ Plot a user's entire Spotify library as an interactive scatter plot. Draw bounda
 ```
 Spotify OAuth  ->  Fetch tracks, playlists, artists (paginated, rate-limited)
                ->  Cache in SQLite (24h TTL)
-               ->  Compute 2D embedding (UMAP on genre/audio features)
+               ->  Python sidecar: ytmusicapi search -> yt-dlp download -> Essentia extraction
+               ->  Discard audio, cache features + YouTube link indefinitely
+               ->  UMAP on Essentia features -> 2D coordinates
                ->  D3 Canvas scatter plot with playlist hulls + cluster overlays
 ```
 
@@ -52,13 +54,37 @@ Spotify OAuth  ->  Fetch tracks, playlists, artists (paginated, rate-limited)
 
 **Gotcha discovered**: `allowedDevOrigins` in Next.js 16 must be bare hostnames (`["127.0.0.1"]`), not full URLs. Wrong format silently blocks HMR websocket, preventing React hydration.
 
-### Phase 4: UMAP Integration -- TODO
-- FastAPI `/umap` endpoint — accept feature vectors, return 2D coordinates
-- **Since audio features are unavailable**, build feature vectors from:
-  - Artist genre presence (binary vector across all genres in library)
-  - Track popularity, duration
-  - Album release year
-- Z-score normalize before UMAP; `random_state=42` for determinism
+### Phase 4: Audio Feature Extraction + UMAP
+
+Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns null for all tracks. We source audio from YouTube Music instead.
+
+#### 4a: Audio sourcing pipeline (Python sidecar) -- DONE
+- `ytmusicapi` with **unauthenticated search** (sufficient for song lookup)
+- For each Spotify track: search YouTube Music by `"{track name}" "{artist name}"` (parenthetical suffixes stripped for cleaner search)
+- Match on duration (±5s tolerance) to filter wrong versions
+- Download audio with `yt-dlp` (lowest quality sufficient — 128kbps, opus/m4a)
+- **Discard audio immediately after feature extraction** — no persistent audio storage
+- Cache YouTube Music link in SQLite indefinitely (keyed by Spotify track ID)
+- FastAPI `/features` endpoint — accepts list of track metadata, SSE progress streaming
+- Next.js `/api/features` proxy route streams SSE through to FeatureExtractor component
+- `asyncio.to_thread()` for blocking I/O (ytmusicapi + yt-dlp) to keep uvicorn event loop responsive
+- ~96% match rate on 907 tracks (336 matched, 20 failed in test run)
+
+**Gotcha discovered**: Synchronous blocking calls (ytmusicapi search, yt-dlp download) inside an async SSE generator block uvicorn's event loop, preventing SSE events from flushing. Must use `asyncio.to_thread()` for all blocking I/O.
+
+#### 4b: Essentia feature extraction
+- Extract per-track features via Essentia:
+  - MFCCs (timbre)
+  - Spectral centroid, bandwidth, rolloff (brightness/texture)
+  - BPM, beat strength (rhythm)
+  - Key, scale (tonal)
+  - Dynamic range, average loudness (energy)
+  - Essentia TensorFlow models for mood/genre classification (if practical)
+- Output: fixed-length feature vector per track
+
+#### 4c: UMAP embedding
+- Z-score normalize feature vectors before UMAP
+- `random_state=42` for determinism
 - Cache UMAP results in SQLite (keyed by feature matrix hash)
 - Next.js `/api/umap` proxy route to Python sidecar
 - Wire coordinates into ScatterPlot, replace Release Year / Popularity axes
@@ -86,11 +112,11 @@ Spotify OAuth  ->  Fetch tracks, playlists, artists (paginated, rate-limited)
 ### Phase 8: Polish & Deploy -- TODO
 - Dark theme refinement, smooth animations, responsive layout
 - Album art thumbnails on hover (lazy-loaded) — already implemented
-- Song preview playback (30-sec Spotify previews; many tracks have null `preview_url`)
 - Error handling (expired tokens, API failures, empty libraries)
 - Dockerize: multi-stage builds, `output: 'standalone'` in Next.js config
 - Deploy to Oracle Cloud VPS, set up Cloudflare tunnel
-- **ARM64 note**: `umap-learn` and `hdbscan` compile C extensions; Dockerfiles need `gcc` and `python3-dev`
+- **ARM64 note**: `umap-learn`, `hdbscan`, and `essentia` compile C extensions; Dockerfiles need `gcc`, `python3-dev`, and Essentia system dependencies
+- **yt-dlp in Docker**: ensure `ffmpeg` is installed in the Python container
 
 ### Phase 9: Last.fm Integration -- LATER
 - `pylast` for scrobble counts and recency per track
@@ -102,12 +128,16 @@ Spotify OAuth  ->  Fetch tracks, playlists, artists (paginated, rate-limited)
 
 | Issue | Mitigation |
 |-------|-----------|
-| Audio features API restricted for new apps | Fallback to genre-based embeddings; apply for extended quota |
+| Spotify audio features + preview_url unavailable | Source audio from YouTube Music via ytmusicapi + yt-dlp, extract features with Essentia |
+| ytmusicapi search returns wrong track | Match on duration (±5s tolerance); skip tracks with no confident match |
+| ytmusicapi browser auth cookies expire | Detect 401 and prompt user to re-authenticate; store auth headers in a config file |
+| yt-dlp download failures (geo-restricted, removed) | Skip track, log warning, proceed with remaining tracks; UMAP handles missing points |
 | D3 + React DOM conflict | `useRef` + `useEffect` pattern; D3 binds to Canvas, React doesn't touch it |
 | Canvas hit-testing (no DOM events on circles) | `d3.quadtree` for O(log n) nearest-point lookup on mousemove |
 | Convex hull with <3 points or collinear points | Fallback to circle; handle `d3.polygonHull` returning null |
 | UMAP non-determinism | Fixed `random_state=42` |
 | Every Noise site changes | Defensive scraper with graceful degradation |
+| Essentia + native deps on ARM | Include `gcc`, `python3-dev`, `ffmpeg`, and Essentia system deps in Dockerfile |
 | `better-sqlite3` native compilation on ARM | Include `python3`, `make`, `gcc` in Dockerfile build stage |
 | `localhost` vs `127.0.0.1` cookie mismatch | Always use `127.0.0.1` in development |
 | `redirect()` throws NEXT_REDIRECT | Never call inside try/catch |
@@ -117,7 +147,7 @@ Spotify OAuth  ->  Fetch tracks, playlists, artists (paginated, rate-limited)
 1. **Phase 1**: Dashboard shows Spotify display name after OAuth
 2. **Phase 2**: `/api/library` returns full track list in <30 seconds; subsequent loads are instant (cached)
 3. **Phase 3**: Scatter plot renders 900+ points with smooth zoom/pan; hover tooltips work
-4. **Phase 4**: UMAP view shows meaningful clustering (similar songs nearby)
+4. **Phase 4**: Audio features extracted for 90%+ of tracks; UMAP view shows meaningful clustering (similar songs nearby)
 5. **Phase 5**: Playlist hulls visible, toggling works
 6. **Phase 6**: Genre view shows recognizable neighborhoods, animated toggle works
 7. **Phase 7**: Cluster panel identifies at least one latent cluster and one discordant playlist

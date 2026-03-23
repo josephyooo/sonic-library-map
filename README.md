@@ -11,7 +11,9 @@ An interactive web app that plots your entire Spotify library as a scatter plot,
 | Auth | Spotify OAuth 2.0 + `iron-session` encrypted cookies |
 | Database | SQLite via `better-sqlite3` (WAL mode, 24h cache TTL) |
 | Rate limiting | `p-queue` (concurrency 10, 25 req/sec) |
-| ML sidecar | FastAPI + `umap-learn` + `hdbscan` (Python 3.11) |
+| Audio analysis | [Essentia](https://essentia.upf.edu) (feature extraction from audio) |
+| Audio sourcing | [ytmusicapi](https://github.com/sigma67/ytmusicapi) (search) + `yt-dlp` (download) |
+| ML sidecar | FastAPI + `umap-learn` + `hdbscan` + Essentia (Python 3.11) |
 | Deployment | Docker Compose on Oracle Cloud VPS behind Cloudflare tunnel |
 
 ## Setup
@@ -19,7 +21,9 @@ An interactive web app that plots your entire Spotify library as a scatter plot,
 ### Prerequisites
 
 - Node.js 20+
+- Python 3.11+ (for the analysis sidecar)
 - A [Spotify Developer App](https://developer.spotify.com/dashboard) with your email added under User Management
+- YouTube Music browser auth headers (for audio sourcing — see [ytmusicapi setup](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html))
 
 ### 1. Configure environment
 
@@ -59,7 +63,9 @@ This starts both the Next.js app (port 3000) and the Python UMAP sidecar (port 8
 User  ->  Spotify OAuth login
       ->  Fetch saved tracks + playlists + artist genres  (paginated, rate-limited)
       ->  Cache in SQLite
-      ->  Send features to Python sidecar  ->  UMAP  ->  2D coordinates
+      ->  Python sidecar: search YouTube Music  ->  download audio  ->  Essentia feature extraction
+      ->  Discard audio, cache features + YouTube link in SQLite
+      ->  UMAP on audio features  ->  2D coordinates
       ->  D3 renders interactive scatter plot with playlist boundaries
 ```
 
@@ -83,17 +89,19 @@ next-app/src/
     types.ts    -- shared TypeScript interfaces
 
 umap-service/
-  main.py      -- FastAPI: /umap, /cluster, /health
-  cluster.py   -- HDBSCAN clustering
+  main.py       -- FastAPI: /umap, /cluster, /features, /health
+  cluster.py    -- HDBSCAN clustering
+  audio_source.py -- ytmusicapi search + yt-dlp download + SQLite cache
 ```
 
 ## Current state
 
-Phases 0 through 3 are complete: OAuth, library data fetching with caching, and a basic scatter plot (Release Year vs. Popularity) with hover tooltips, click-to-open, zoom/pan, and playlist color filtering. See [PLAN.md](PLAN.md) for upcoming phases.
+Phases 0 through 3 and 4a are complete: OAuth, library data fetching with caching, a basic scatter plot (Release Year vs. Popularity) with hover tooltips, click-to-open, zoom/pan, and playlist color filtering, plus the YouTube Music audio sourcing pipeline (~96% match rate on 907 tracks). See [PLAN.md](PLAN.md) for upcoming phases.
 
 ## Known limitations
 
-- **Audio features unavailable**: Spotify deprecated the `/audio-features` endpoint for new apps in November 2024. The app gracefully falls back to zero audio features. UMAP (Phase 4) will need to use genre-based embeddings instead.
+- **Spotify audio features unavailable**: Spotify deprecated the `/audio-features` endpoint for new apps in November 2024, and `preview_url` returns null for all tracks. Audio features are instead extracted via YouTube Music (search with ytmusicapi → download with yt-dlp → analyze with Essentia). Audio files are discarded after processing.
+- **YouTube Music browser auth expires**: The ytmusicapi browser auth cookies need periodic re-authentication.
 - **Scatter plot axes are temporary**: Release Year vs. Popularity are placeholder axes until UMAP coordinates replace them.
 
 ## License

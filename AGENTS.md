@@ -49,6 +49,15 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - All Spotify calls go through `spotifyFetch()` in `src/lib/spotify.ts`, which handles rate limiting via `p-queue` and 429 retries.
 - Pagination is handled by `fetchAllPages()` — never manually paginate.
 - Audio features endpoint is deprecated for new apps (Nov 2024). Always wrap in try/catch.
+- `preview_url` is null for all tracks — Spotify no longer provides preview audio for new apps.
+
+### Audio feature extraction (Python sidecar)
+- Spotify provides no usable audio. Features are extracted via a YouTube Music pipeline: `ytmusicapi` search → `yt-dlp` download → Essentia extraction.
+- **ytmusicapi uses browser auth** (cookie-based, no API quota limits). Google Cloud OAuth auth is impractical (100 searches/day at 100 units/search).
+- Audio files are **temporary** — downloaded, processed by Essentia, then immediately deleted. Only the extracted feature vectors and the YouTube Music link are cached.
+- Feature cache is **indefinite** (keyed by Spotify track ID). No TTL — audio characteristics don't change.
+- Match Spotify tracks to YouTube Music results using track name + artist name search, filtered by duration (±5s tolerance).
+- If a track can't be found or downloaded, skip it gracefully. UMAP handles incomplete data.
 
 ### Caching
 - SQLite via `better-sqlite3` (synchronous, server-side only). WAL mode enabled.
@@ -69,5 +78,6 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 ## Domain knowledge
 
 - Use `127.0.0.1`, never `localhost`, in development. Spotify redirect URIs and browser cookies are domain-scoped — mixing them causes silent auth failures.
-- The project deploys to an Oracle Cloud ARM64 VPS. Docker builds must work on `linux/arm64`. UMAP and HDBSCAN compile C extensions, so the Python Dockerfile includes `gcc` and `python3-dev`.
+- The project deploys to an Oracle Cloud ARM64 VPS. Docker builds must work on `linux/arm64`. UMAP, HDBSCAN, and Essentia compile C extensions, so the Python Dockerfile includes `gcc`, `python3-dev`, and `ffmpeg`.
 - The Spotify app is in development mode with limited users. New test users must be added under User Management in the Spotify developer dashboard.
+- YouTube Music browser auth headers are stored in a config file consumed by `ytmusicapi`. These expire periodically and must be refreshed by the user.
