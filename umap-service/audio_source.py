@@ -88,6 +88,12 @@ def _get_db() -> sqlite3.Connection:
             FOREIGN KEY (spotify_id) REFERENCES youtube_matches(spotify_id)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS umap_cache (
+            cache_key TEXT PRIMARY KEY,
+            coordinates TEXT NOT NULL
+        )
+    """)
     conn.commit()
     return conn
 

@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, Request
@@ -118,9 +119,24 @@ def _compute_umap(
     return UMAPResponse(coordinates=coordinates, x_axis=x_axis, y_axis=y_axis)
 
 
-def _run_umap_subprocess(matrix: np.ndarray, n_neighbors: int, min_dist: float) -> list[list[float]]:
-    """Run PCA + UMAP in a subprocess to isolate numba from TensorFlow."""
-    script = """
+def _run_numba_subprocess(script: str, input_data: dict, timeout: int, label: str) -> Any:
+    """Run a Python script in a subprocess to isolate numba from TensorFlow.
+
+    Returns parsed JSON from the subprocess stdout.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        input=json.dumps(input_data),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"{label} subprocess failed: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+_UMAP_SCRIPT = """
 import sys, json, numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -142,26 +158,8 @@ eff_neighbors = max(2, min(n_neighbors, matrix.shape[0] - 1))
 coords = UMAP(n_components=2, n_neighbors=eff_neighbors, min_dist=min_dist, random_state=42, n_jobs=1).fit_transform(normalized)
 print(json.dumps(coords.tolist()))
 """
-    input_data = json.dumps({
-        "matrix": matrix.tolist(),
-        "n_neighbors": n_neighbors,
-        "min_dist": min_dist,
-    })
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        input=input_data,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"UMAP subprocess failed: {result.stderr}")
-    return json.loads(result.stdout)
 
-
-def _run_hdbscan_subprocess(matrix: np.ndarray, min_cluster_size: int) -> list[int]:
-    """Run HDBSCAN in a subprocess to isolate numba from TensorFlow."""
-    script = """
+_HDBSCAN_SCRIPT = """
 import sys, json, numpy as np
 from hdbscan import HDBSCAN
 
@@ -170,20 +168,18 @@ matrix = np.array(data["matrix"], dtype=np.float64)
 labels = HDBSCAN(min_cluster_size=data["min_cluster_size"], min_samples=3).fit_predict(matrix)
 print(json.dumps(labels.tolist()))
 """
-    input_data = json.dumps({
-        "matrix": matrix.tolist(),
-        "min_cluster_size": min_cluster_size,
-    })
-    result = subprocess.run(
-        [sys.executable, "-c", script],
-        input=input_data,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"HDBSCAN subprocess failed: {result.stderr}")
-    return json.loads(result.stdout)
+
+
+def _run_umap_subprocess(matrix: np.ndarray, n_neighbors: int, min_dist: float) -> list[list[float]]:
+    return _run_numba_subprocess(_UMAP_SCRIPT, {
+        "matrix": matrix.tolist(), "n_neighbors": n_neighbors, "min_dist": min_dist,
+    }, timeout=300, label="UMAP")
+
+
+def _run_hdbscan_subprocess(matrix: np.ndarray, min_cluster_size: int) -> list[int]:
+    return _run_numba_subprocess(_HDBSCAN_SCRIPT, {
+        "matrix": matrix.tolist(), "min_cluster_size": min_cluster_size,
+    }, timeout=60, label="HDBSCAN")
 
 
 # Direction hints for named features (low → high)
@@ -244,12 +240,6 @@ def _best_axis_correlation(
 def _get_umap_cache(cache_key: str) -> dict[str, list[float]] | None:
     from audio_source import _get_db
     conn = _get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS umap_cache (
-            cache_key TEXT PRIMARY KEY,
-            coordinates TEXT NOT NULL
-        )
-    """)
     row = conn.execute(
         "SELECT coordinates FROM umap_cache WHERE cache_key = ?", (cache_key,)
     ).fetchone()
@@ -262,12 +252,6 @@ def _get_umap_cache(cache_key: str) -> dict[str, list[float]] | None:
 def _cache_umap(cache_key: str, coordinates: dict[str, list[float]]) -> None:
     from audio_source import _get_db
     conn = _get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS umap_cache (
-            cache_key TEXT PRIMARY KEY,
-            coordinates TEXT NOT NULL
-        )
-    """)
     conn.execute(
         "INSERT OR REPLACE INTO umap_cache (cache_key, coordinates) VALUES (?, ?)",
         (cache_key, json.dumps(coordinates)),
@@ -417,8 +401,10 @@ async def compute_clusters(request: ClusterRequest):
 @app.get("/features")
 async def get_cached():
     """Return all cached TF embeddings (for UMAP) and raw features (for overlay)."""
-    all_embeddings = await asyncio.to_thread(get_all_cached_embeddings)
-    all_raw = await asyncio.to_thread(get_all_cached_features)
+    all_embeddings, all_raw = await asyncio.gather(
+        asyncio.to_thread(get_all_cached_embeddings),
+        asyncio.to_thread(get_all_cached_features),
+    )
     return {
         "features": all_embeddings,
         "raw_features": all_raw,
@@ -501,14 +487,10 @@ async def run_feature_extraction(body: FeaturesRequest, request: Request):
                 failed += 1
                 continue
 
-            # Extract TF embedding (for UMAP)
-            embedding = await asyncio.to_thread(
-                extract_embedding, result.file_path
-            )
-
-            # Extract raw features (for "Color by" overlay) — non-critical
-            raw_features = await asyncio.to_thread(
-                extract_features, result.file_path
+            # Extract TF embedding + raw features concurrently
+            embedding, raw_features = await asyncio.gather(
+                asyncio.to_thread(extract_embedding, result.file_path),
+                asyncio.to_thread(extract_features, result.file_path),
             )
 
             if embedding is not None:
@@ -567,8 +549,10 @@ async def list_downloads():
 async def list_matches():
     """Return all cached YouTube Music matches with feature status."""
     from audio_source import get_all_cached_matches
-    matches = get_all_cached_matches()
-    all_features = get_all_cached_features()
+    matches, all_features = await asyncio.gather(
+        asyncio.to_thread(get_all_cached_matches),
+        asyncio.to_thread(get_all_cached_features),
+    )
     return [
         {
             "spotify_id": m.spotify_id,

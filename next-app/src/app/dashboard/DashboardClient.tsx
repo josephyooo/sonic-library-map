@@ -13,13 +13,8 @@ import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay from "@/components/FeatureOverlay";
+import { handleApiError, parseAxisLabel } from "@/lib/api";
 import * as d3 from "d3";
-
-function handleApiError(response: Response): void {
-  if (response.status === 401) {
-    window.location.href = "/";
-  }
-}
 
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
@@ -52,7 +47,6 @@ export default function DashboardClient() {
   const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
-  const [trackFeatures, setTrackFeatures] = useState<Record<string, number[]> | null>(null);
   const [rawFeatures, setRawFeatures] = useState<Record<string, number[]> | null>(null);
   const [colorFeatureIdx, setColorFeatureIdx] = useState<number | null>(null);
   const cachedFeaturesLoaded = useRef(false);
@@ -72,7 +66,6 @@ export default function DashboardClient() {
         const data = await response.json();
         const count = data.count ?? 0;
         setCachedFeatureCount(count);
-        if (data.features) setTrackFeatures(data.features);
         if (data.raw_features) setRawFeatures(data.raw_features);
 
         if (count >= 5) {
@@ -94,8 +87,8 @@ export default function DashboardClient() {
             setUmapCoords(umapData.coordinates);
             if (umapData.x_axis || umapData.y_axis) {
               setUmapAxisLabels({
-                x: umapData.x_axis ? { name: umapData.x_axis.name, directionLow: umapData.x_axis.direction_low, directionHigh: umapData.x_axis.direction_high } : null,
-                y: umapData.y_axis ? { name: umapData.y_axis.name, directionLow: umapData.y_axis.direction_low, directionHigh: umapData.y_axis.direction_high } : null,
+                x: parseAxisLabel(umapData.x_axis),
+                y: parseAxisLabel(umapData.y_axis),
               });
             }
           }
@@ -287,7 +280,6 @@ export default function DashboardClient() {
       if (!libraryData) return;
 
       setCachedFeatureCount(Object.keys(features).length);
-      setTrackFeatures({ ...features });
 
       umapAbortRef.current?.abort();
       const controller = new AbortController();
@@ -311,8 +303,8 @@ export default function DashboardClient() {
           setUmapCoords(data.coordinates);
           if (data.x_axis || data.y_axis) {
             setUmapAxisLabels({
-              x: data.x_axis ? { name: data.x_axis.name, directionLow: data.x_axis.direction_low, directionHigh: data.x_axis.direction_high } : null,
-              y: data.y_axis ? { name: data.y_axis.name, directionLow: data.y_axis.direction_low, directionHigh: data.y_axis.direction_high } : null,
+              x: parseAxisLabel(data.x_axis),
+              y: parseAxisLabel(data.y_axis),
             });
           }
         }
@@ -325,7 +317,7 @@ export default function DashboardClient() {
         }
       }
     },
-    [libraryData, rawFeatures],
+    [libraryData],
   );
 
   const handleViewChange = useCallback(

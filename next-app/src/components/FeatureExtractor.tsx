@@ -2,12 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { LibraryData } from "@/lib/types";
-
-function handleApiError(response: Response): void {
-  if (response.status === 401) {
-    window.location.href = "/";
-  }
-}
+import { handleApiError } from "@/lib/api";
 
 const UMAP_UPDATE_INTERVAL = 10;
 
