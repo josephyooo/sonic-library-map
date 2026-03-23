@@ -6,6 +6,24 @@ export const dynamic = "force-dynamic";
 const UMAP_SERVICE_URL =
   process.env.UMAP_SERVICE_URL || "http://127.0.0.1:8000";
 
+export async function GET() {
+  const session = await getSession();
+  if (!session.accessToken) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const response = await fetch(`${UMAP_SERVICE_URL}/features`);
+  if (!response.ok) {
+    return NextResponse.json(
+      { error: "Failed to fetch cached features" },
+      { status: 502 },
+    );
+  }
+
+  const data = await response.json();
+  return NextResponse.json(data);
+}
+
 export async function POST(request: NextRequest) {
   const session = await getSession();
   if (!session.accessToken) {

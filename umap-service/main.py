@@ -156,6 +156,16 @@ async def compute_umap(request: UMAPRequest):
     return UMAPResponse(coordinates=coords)
 
 
+# ─── Cached features ─────────────────────────────────────────────────────────
+
+
+@app.get("/features")
+async def get_cached():
+    """Return all cached feature vectors without running extraction."""
+    all_features = await asyncio.to_thread(get_all_cached_features)
+    return {"features": all_features, "count": len(all_features)}
+
+
 # ─── Audio sourcing (Phase 4a) ──────────────────────────────────────────────
 
 
