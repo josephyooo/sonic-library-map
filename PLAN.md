@@ -72,15 +72,19 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 
 **Gotcha discovered**: Synchronous blocking calls (ytmusicapi search, yt-dlp download) inside an async SSE generator block uvicorn's event loop, preventing SSE events from flushing. Must use `asyncio.to_thread()` for all blocking I/O.
 
-#### 4b: Essentia feature extraction
-- Extract per-track features via Essentia:
-  - MFCCs (timbre)
-  - Spectral centroid, bandwidth, rolloff (brightness/texture)
-  - BPM, beat strength (rhythm)
-  - Key, scale (tonal)
-  - Dynamic range, average loudness (energy)
-  - Essentia TensorFlow models for mood/genre classification (if practical)
-- Output: fixed-length feature vector per track
+#### 4b: Essentia feature extraction -- DONE
+- `feature_extract.py` — 41-dimensional feature vector per track:
+  - MFCC mean + std (26 dims) — timbre
+  - Spectral centroid, rolloff, flatness (3 dims) — brightness/texture
+  - BPM, beat confidence (2 dims) — rhythm
+  - Key, scale, key strength (3 dims) — tonality
+  - Integrated loudness, loudness range, dynamic complexity (3 dims) — dynamics
+  - Danceability, energy (log-scaled), RMS, zero crossing rate (4 dims) — groove/power
+- Features cached indefinitely in SQLite `audio_features` table (keyed by Spotify track ID)
+- Audio files deleted immediately after extraction
+- yt-dlp uses Chrome cookies + EJS challenge solver for YouTube authentication
+
+**Gotcha discovered**: yt-dlp requires the EJS challenge solver script (`--remote-components ejs:github`) to solve YouTube's signature verification. Without it, downloads fail with "Requested format is not available." Also, the `bestaudio[abr<=128]` format filter fails when authenticated — use `bestaudio` instead.
 
 #### 4c: UMAP embedding
 - Z-score normalize feature vectors before UMAP
@@ -132,9 +136,10 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 | ytmusicapi search returns wrong track | Match on duration (±5s tolerance); skip tracks with no confident match |
 | ytmusicapi browser auth cookies expire | Detect 401 and prompt user to re-authenticate; store auth headers in a config file |
 | yt-dlp download failures (geo-restricted, removed) | Skip track, log warning, proceed with remaining tracks; UMAP handles missing points |
+| yt-dlp signature verification fails | Install EJS challenge solver: `yt-dlp --remote-components ejs:github --skip-download URL`; use `bestaudio` format (not `bestaudio[abr<=128]`) |
 | D3 + React DOM conflict | `useRef` + `useEffect` pattern; D3 binds to Canvas, React doesn't touch it |
 | Canvas hit-testing (no DOM events on circles) | `d3.quadtree` for O(log n) nearest-point lookup on mousemove |
-| Convex hull with <3 points or collinear points | Fallback to circle; handle `d3.polygonHull` returning null |
+| Convex hull with \<3 points or collinear points | Fallback to circle; handle `d3.polygonHull` returning null |
 | UMAP non-determinism | Fixed `random_state=42` |
 | Every Noise site changes | Defensive scraper with graceful degradation |
 | Essentia + native deps on ARM | Include `gcc`, `python3-dev`, `ffmpeg`, and Essentia system deps in Dockerfile |

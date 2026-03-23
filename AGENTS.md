@@ -58,6 +58,10 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - Feature cache is **indefinite** (keyed by Spotify track ID). No TTL — audio characteristics don't change.
 - Match Spotify tracks to YouTube Music results using track name + artist name search, filtered by duration (±5s tolerance).
 - If a track can't be found or downloaded, skip it gracefully. UMAP handles incomplete data.
+- **yt-dlp requires Chrome cookies** (`cookiesfrombrowser: ('chrome',)`) and the **EJS challenge solver** (`yt-dlp --remote-components ejs:github --skip-download URL`) for YouTube authentication. Without EJS, downloads fail.
+- Use `bestaudio` format — the `bestaudio[abr<=128]` filter fails when authenticated with cookies.
+- Essentia extraction produces a **41-dimensional feature vector** per track (MFCCs, spectral, rhythm, tonal, dynamics). See `feature_extract.py` docstring for the full breakdown.
+- All blocking I/O in the sidecar (ytmusicapi search, yt-dlp download, Essentia extraction) must use `asyncio.to_thread()` to avoid blocking uvicorn's event loop.
 
 ### Caching
 - SQLite via `better-sqlite3` (synchronous, server-side only). WAL mode enabled.

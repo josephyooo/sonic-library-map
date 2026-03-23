@@ -96,7 +96,7 @@ umap-service/
 
 ## Current state
 
-Phases 0 through 3 and 4a are complete: OAuth, library data fetching with caching, a basic scatter plot (Release Year vs. Popularity) with hover tooltips, click-to-open, zoom/pan, and playlist color filtering, plus the YouTube Music audio sourcing pipeline (~96% match rate on 907 tracks). See [PLAN.md](PLAN.md) for upcoming phases.
+Phases 0 through 3, 4a, and 4b are complete: OAuth, library data fetching with caching, a basic scatter plot (Release Year vs. Popularity) with hover tooltips, click-to-open, zoom/pan, playlist color filtering, YouTube Music audio sourcing (~96% match rate), and Essentia feature extraction (41-dim vector per track). See [PLAN.md](PLAN.md) for upcoming phases.
 
 ## Known limitations
 
