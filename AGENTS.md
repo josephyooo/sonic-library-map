@@ -54,7 +54,7 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 ### Audio feature extraction (Python sidecar)
 - Spotify provides no usable audio. Features are extracted via a YouTube Music pipeline: `ytmusicapi` search → `yt-dlp` download → Essentia extraction.
 - **ytmusicapi uses browser auth** (cookie-based, no API quota limits). Google Cloud OAuth auth is impractical (100 searches/day at 100 units/search).
-- Audio files are **temporary** — downloaded, processed by Essentia, then immediately deleted. Only the extracted feature vectors and the YouTube Music link are cached.
+- Audio files are **persisted** in `umap-service/data/audio/` during development (tracked in `downloads` SQLite table). This avoids re-downloading if the extraction approach pivots. Re-enable deletion in production.
 - Feature cache is **indefinite** (keyed by Spotify track ID). No TTL — audio characteristics don't change.
 - Match Spotify tracks to YouTube Music results using track name + artist name search, filtered by duration (±5s tolerance).
 - If a track can't be found or downloaded, skip it gracefully. UMAP handles incomplete data.
@@ -62,10 +62,13 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - Use `bestaudio` format — the `bestaudio[abr<=128]` filter fails when authenticated with cookies.
 - **Two types of Essentia features are extracted**:
   1. **Raw features** (41-dim): MFCCs, spectral, rhythm, tonal, dynamics — stored in `audio_features` table. Used for "Color by" overlay (BPM, loudness, etc.) but NOT for UMAP.
-  2. **TF embeddings** (2048-dim): Discogs-EffNet model output — stored in `tf_embeddings` table. Used as UMAP input. Captures learned genre/style/mood similarity.
-- Raw spectral features (MFCCs) produce nonsensical UMAP clusters. Always use TF embeddings for dimensionality reduction.
-- The Discogs-EffNet model file must be downloaded separately (~20MB) and placed in `umap-service/models/`.
+  2. **TF embeddings** (1280-dim): Discogs-EffNet model output — stored in `tf_embeddings` table. Used as UMAP input. Captures learned genre/style/mood similarity.
+- Raw spectral features (MFCCs) produce nonsensical UMAP clusters. Always use TF embeddings (1280-dim) for dimensionality reduction.
+- The Discogs-EffNet model file must be downloaded separately (~18MB) and placed in `umap-service/models/`.
 - All blocking I/O in the sidecar (ytmusicapi search, yt-dlp download, Essentia extraction) must use `asyncio.to_thread()` to avoid blocking uvicorn's event loop.
+- **UMAP and HDBSCAN must run in subprocesses** — they depend on numba, which crashes with a `mutex lock failed` error when loaded in the same process as TensorFlow (via essentia-tensorflow). The sidecar shells out to `subprocess.run()` for these computations. Do NOT attempt top-level imports of `umap` or `hdbscan` in `main.py`.
+- UMAP input is PCA-reduced from 1280-dim to min(50, n_tracks-1) dims before fitting. This removes noise and speeds up computation.
+- The `POST /api/features` SSE proxy has **no timeout** — extraction can run for 30+ minutes. The sidecar checks `request.is_disconnected()` between tracks to stop work if the client goes away.
 
 ### Caching
 - SQLite via `better-sqlite3` (synchronous, server-side only). WAL mode enabled.

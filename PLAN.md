@@ -72,24 +72,30 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 
 **Gotcha discovered**: Synchronous blocking calls (ytmusicapi search, yt-dlp download) inside an async SSE generator block uvicorn's event loop, preventing SSE events from flushing. Must use `asyncio.to_thread()` for all blocking I/O.
 
-#### 4b: Essentia feature extraction -- PIVOTING
+#### 4b: Essentia feature extraction -- DONE
 
 **Original approach (41-dim raw features)**: MFCCs (26), spectral (3), rhythm (2), tonality (3), dynamics (3), groove/power (4). Produced nonsensical UMAP clusters because MFCCs dominated the vector and raw spectral features aren't perceptually meaningful.
 
-**New approach (Discogs-EffNet embeddings)**: Use Essentia's TensorFlow model `discogs-effnet-bs64-1` to extract a 2048-dimensional embedding per track. This model was trained on millions of tracks to capture genre, style, mood, and instrumentation — songs that sound alike have similar embeddings. UMAP on this should produce clusters like "indie folk", "electronic dance", "orchestral" instead of noise.
+**New approach (Discogs-EffNet embeddings)**: Essentia's TensorFlow model `discogs-effnet-bs64-1` extracts a 1280-dimensional embedding per track. The model produces one embedding per ~1s patch; these are averaged to a single track-level vector. Trained on millions of tracks to capture genre, style, mood, and instrumentation — songs that sound alike have similar embeddings.
 
 Implementation:
-- Install `essentia-tensorflow` in conda env
-- Download Discogs-EffNet model (~20MB)
-- New extraction function: MonoLoader → mel spectrogram → TensorflowPredictEffnetDiscogs → embedding
-- Store TF embeddings in a **separate** SQLite table `tf_embeddings` (keyed by Spotify track ID) — doesn't invalidate existing raw features
-- Re-download audio for tracks missing TF embeddings (YouTube links already cached from 4a)
-- UMAP input switches from 41-dim raw features to 2048-dim TF embeddings
-- Optionally retain raw features for the "Color by" overlay (BPM, loudness, etc. are still useful for exploration)
+- `essentia-tensorflow` + `tensorflow` installed in conda env
+- Discogs-EffNet model (~18MB) downloaded to `umap-service/models/`
+- `tf_extract.py`: MonoLoader (16kHz) → TensorflowPredictEffnetDiscogs → average patches → 1280-dim embedding
+- TF embeddings stored in separate SQLite table `tf_embeddings` (keyed by Spotify track ID)
+- Raw 41-dim features retained in `audio_features` table for "Color by" overlay
+- Both extracted per track during SSE streaming; only TF embeddings sent to client for UMAP
+- UMAP axis correlation labels use raw features (interpretable) correlated against TF-based UMAP coordinates
+- YouTube links cached from 4a; tracks need re-download for TF extraction but search is skipped
+- Audio files persisted in `data/audio/` during development; tracked in `downloads` SQLite table for reuse across runs
 
-**Gotcha discovered**: yt-dlp requires the EJS challenge solver script (`--remote-components ejs:github`) to solve YouTube's signature verification. Without it, downloads fail with "Requested format is not available." Also, the `bestaudio[abr<=128]` format filter fails when authenticated — use `bestaudio` instead.
+**Gotchas discovered**:
+- yt-dlp requires the EJS challenge solver script (`--remote-components ejs:github`) to solve YouTube's signature verification. Without it, downloads fail with "Requested format is not available." Also, the `bestaudio[abr<=128]` format filter fails when authenticated — use `bestaudio` instead.
+- UMAP/HDBSCAN (numba) and TensorFlow (essentia-tensorflow) crash with `mutex lock failed` when imported in the same process. UMAP and HDBSCAN must run in subprocesses.
+- PCA pre-processing (1280 → 50 dims) before UMAP removes noise and speeds up computation.
+- The SSE features proxy must have no timeout — extraction can run 30+ minutes. The sidecar checks `request.is_disconnected()` to stop work on client disconnect.
 
-#### 4c: UMAP embedding -- DONE (will re-run with TF embeddings)
+#### 4c: UMAP embedding -- DONE
 - Z-score normalize feature vectors (StandardScaler) before UMAP
 - `random_state=42`, `n_jobs=1` for determinism
 - Cache UMAP results in SQLite `umap_cache` table (keyed by SHA-256 hash of feature matrix) — cache auto-invalidates when features change
@@ -158,13 +164,16 @@ Implementation:
 | D3 + React DOM conflict | `useRef` + `useEffect` pattern; D3 binds to Canvas, React doesn't touch it |
 | Canvas hit-testing (no DOM events on circles) | `d3.quadtree` for O(log n) nearest-point lookup on mousemove |
 | Convex hull with \<3 points or collinear points | Fallback to circle; handle `d3.polygonHull` returning null |
-| Raw spectral features produce nonsensical UMAP clusters | Pivot to Discogs-EffNet TF embeddings (2048-dim learned musical similarity) instead of 41-dim MFCCs/spectral |
+| Raw spectral features produce nonsensical UMAP clusters | Pivot to Discogs-EffNet TF embeddings (1280-dim learned musical similarity) instead of 41-dim MFCCs/spectral |
 | UMAP non-determinism | Fixed `random_state=42` |
 | Every Noise site changes | Defensive scraper with graceful degradation |
 | Essentia + native deps on ARM | Include `gcc`, `python3-dev`, `ffmpeg`, and Essentia system deps in Dockerfile |
 | `better-sqlite3` native compilation on ARM | Include `python3`, `make`, `gcc` in Dockerfile build stage |
 | `localhost` vs `127.0.0.1` cookie mismatch | Always use `127.0.0.1` in development |
 | `redirect()` throws NEXT_REDIRECT | Never call inside try/catch |
+| numba (UMAP/HDBSCAN) + TensorFlow mutex crash | Run UMAP and HDBSCAN in subprocesses; never import `umap` or `hdbscan` in the same process as `essentia-tensorflow` |
+| SSE proxy timeout kills long extractions | Remove `AbortSignal.timeout` on `POST /api/features`; sidecar checks `request.is_disconnected()` to self-cancel |
+| UMAP slow on 1280-dim embeddings | PCA pre-processing reduces to 50 dims; subprocess startup ~10s (numba JIT), cached calls ~80ms |
 
 ## Verification checklist
 
