@@ -103,11 +103,14 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 - Playlist labels at hull centroids (10px, 50% opacity)
 - Toggle visibility per playlist (wired through existing PlaylistLegend)
 
-### Phase 6: Every Noise Genre View -- TODO
-- `lib/genre-scraper.ts` — fetch everynoise.com HTML, parse with `cheerio`, extract genre coordinates from inline styles
-- Cache in SQLite, re-scrape weekly
-- Map songs to genre coordinates via artist genres (average if multiple)
-- `ViewToggle.tsx` — animated transition between UMAP and genre views (~800ms D3 transition)
+### Phase 6: Every Noise Genre View -- DONE
+- `lib/genre-scraper.ts` — scrape everynoise.com HTML with `cheerio`, extract genre coordinates from `<div class="genre">` inline styles (top/left px) and genre names from `playx()` onclick
+- Coordinates normalized to [0, 1] from canvas pixel positions (1610×~22000px)
+- `/api/genres` route: scrape (or return in-memory cached, 1-week TTL), map tracks to genre coordinates by averaging their artists' genre positions
+- 555/907 tracks mapped (those with artists that have matching genres on Every Noise)
+- `ViewToggle.tsx` — three-way toggle: Year/Pop, UMAP, Genre
+- Genre axes: "Dense ← → Spiky" (x), "Organic ← → Electronic" (y)
+- Genre view fetched lazily on first click
 
 ### Phase 7: Cluster Detection -- TODO
 - HDBSCAN on UMAP coordinates in Python sidecar (`/cluster` endpoint)
