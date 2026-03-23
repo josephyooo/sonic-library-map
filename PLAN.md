@@ -96,12 +96,12 @@ Spotify's `/audio-features` endpoint is deprecated and `preview_url` returns nul
 - Scatter plot axes switch from "Release Year / Popularity" to "UMAP 1 / UMAP 2"
 - Tracks without features are filtered out in UMAP mode
 
-### Phase 5: Playlist Boundaries -- TODO
-- Convex hulls via `d3.polygonHull` (fallback: circle for 1-2 song playlists)
-- Semi-transparent colored polygons behind song dots
-- Playlist labels at hull centroids
-- Toggle visibility per playlist (already wired in PlaylistLegend)
-- Optional: `d3-contour` kernel density for smoother boundaries
+### Phase 5: Playlist Boundaries -- DONE
+- Convex hulls via `d3.polygonHull` drawn behind points in `draw()`
+- Fallback: circle for single-point playlists, ellipse for two-point playlists
+- Semi-transparent colored polygons (8% fill, 30% stroke) using playlist color
+- Playlist labels at hull centroids (10px, 50% opacity)
+- Toggle visibility per playlist (wired through existing PlaylistLegend)
 
 ### Phase 6: Every Noise Genre View -- TODO
 - `lib/genre-scraper.ts` — fetch everynoise.com HTML, parse with `cheerio`, extract genre coordinates from inline styles
