@@ -12,7 +12,18 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const response = await fetch(`${UMAP_SERVICE_URL}/features`);
+  let response: Response;
+  try {
+    response = await fetch(`${UMAP_SERVICE_URL}/features`, {
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Analysis service unavailable — is the Python sidecar running?" },
+      { status: 502 },
+    );
+  }
+
   if (!response.ok) {
     return NextResponse.json(
       { error: "Failed to fetch cached features" },
@@ -33,11 +44,20 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
 
   // Proxy to Python sidecar, streaming SSE back to client
-  const response = await fetch(`${UMAP_SERVICE_URL}/features`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${UMAP_SERVICE_URL}/features`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Analysis service unavailable — is the Python sidecar running?" },
+      { status: 502 },
+    );
+  }
 
   if (!response.ok || !response.body) {
     return NextResponse.json(
