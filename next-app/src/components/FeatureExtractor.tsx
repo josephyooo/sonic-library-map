@@ -7,7 +7,7 @@ interface Progress {
   message: string;
   current: number;
   total: number;
-  matched: number;
+  extracted: number;
   failed: number;
 }
 
@@ -21,7 +21,7 @@ export default function FeatureExtractor({
   const [progress, setProgress] = useState<Progress | null>(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{
-    matched: number;
+    extracted: number;
     failed: number;
     total: number;
   } | null>(null);
@@ -83,12 +83,12 @@ export default function FeatureExtractor({
               message: data.message,
               current: data.current,
               total: data.total,
-              matched: data.matched,
+              extracted: data.extracted,
               failed: data.failed,
             });
           } else if (data.type === "complete") {
             setResult({
-              matched: data.matched,
+              extracted: data.extracted,
               failed: data.failed,
               total: data.total,
             });
@@ -116,9 +116,9 @@ export default function FeatureExtractor({
       {result ? (
         <div className="text-xs text-zinc-300">
           <span className="font-medium text-green-400">
-            {result.matched.toLocaleString()}
+            {result.extracted.toLocaleString()}
           </span>{" "}
-          matched
+          extracted
           {result.failed > 0 && (
             <>
               {" / "}
@@ -148,7 +148,7 @@ export default function FeatureExtractor({
               {progress?.total.toLocaleString() ?? "?"}
             </span>
             <span>
-              {progress?.matched ?? 0} matched, {progress?.failed ?? 0} failed
+              {progress?.extracted ?? 0} extracted, {progress?.failed ?? 0} failed
             </span>
           </div>
         </div>
