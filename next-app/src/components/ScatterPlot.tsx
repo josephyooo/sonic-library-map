@@ -205,9 +205,11 @@ export default function ScatterPlot({
       ctx.fill();
 
       if (isHovered || (isHighlighted && highlightedTracks)) {
+        ctx.beginPath();
+        ctx.arc(px, py, r + 3, 0, Math.PI * 2);
         ctx.strokeStyle = isHovered ? "#fff" : color;
-        ctx.lineWidth = isHovered ? 2 : 1;
-        ctx.globalAlpha = 1;
+        ctx.lineWidth = isHovered ? 2 : 1.5;
+        ctx.globalAlpha = isHovered ? 1 : 0.6;
         ctx.stroke();
       }
     }
