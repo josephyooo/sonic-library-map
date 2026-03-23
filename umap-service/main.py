@@ -156,6 +156,131 @@ async def compute_umap(request: UMAPRequest):
     return UMAPResponse(coordinates=coords)
 
 
+# ─── Cluster detection (Phase 7) ─────────────────────────────────────────────
+
+
+class ClusterRequest(BaseModel):
+    coordinates: dict[str, list[float]]  # spotify_id -> [x, y] from UMAP
+    playlist_tracks: dict[str, list[str]]  # playlist_id -> [track_ids]
+    min_cluster_size: int = 5
+
+
+class ClusterInsight(BaseModel):
+    type: str  # "potential_playlist" or "discordant_playlist"
+    title: str
+    description: str
+    track_ids: list[str]
+    score: float
+
+
+class ClusterResponse(BaseModel):
+    labels: dict[str, int]  # spotify_id -> cluster label (-1 = noise)
+    insights: list[ClusterInsight]
+
+
+def _compute_clusters(
+    coordinates: dict[str, list[float]],
+    playlist_tracks: dict[str, list[str]],
+    min_cluster_size: int,
+) -> ClusterResponse:
+    import numpy as np
+    from hdbscan import HDBSCAN
+
+    track_ids = list(coordinates.keys())
+    if len(track_ids) < min_cluster_size:
+        return ClusterResponse(labels={}, insights=[])
+
+    matrix = np.array([coordinates[tid] for tid in track_ids], dtype=np.float64)
+
+    clusterer = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=3,
+    )
+    labels = clusterer.fit_predict(matrix)
+
+    label_map = {tid: int(labels[i]) for i, tid in enumerate(track_ids)}
+
+    # Build reverse map: cluster_id -> set of track_ids
+    clusters: dict[int, list[str]] = {}
+    for tid, label in label_map.items():
+        if label == -1:
+            continue  # noise
+        clusters.setdefault(label, []).append(tid)
+
+    # Build reverse map: track_id -> set of playlist_ids
+    track_to_playlists: dict[str, set[str]] = {}
+    for pid, tids in playlist_tracks.items():
+        for tid in tids:
+            track_to_playlists.setdefault(tid, set()).add(pid)
+
+    insights: list[ClusterInsight] = []
+
+    # 1. Potential playlists: clusters where tracks share no common playlist
+    for cluster_id, cluster_tids in clusters.items():
+        if len(cluster_tids) < min_cluster_size:
+            continue
+
+        # Find playlists shared by ALL tracks in this cluster
+        playlist_sets = [track_to_playlists.get(tid, set()) for tid in cluster_tids]
+        common = set.intersection(*playlist_sets) if playlist_sets else set()
+
+        # Tracks not in any playlist at all
+        unplaylisted = [tid for tid in cluster_tids if tid not in track_to_playlists]
+        unplaylisted_ratio = len(unplaylisted) / len(cluster_tids)
+
+        if not common and unplaylisted_ratio > 0.3:
+            insights.append(ClusterInsight(
+                type="potential_playlist",
+                title=f"Cluster {cluster_id} ({len(cluster_tids)} songs)",
+                description=f"{len(cluster_tids)} similar songs with no shared playlist. "
+                            f"{len(unplaylisted)} aren't in any playlist.",
+                track_ids=cluster_tids,
+                score=unplaylisted_ratio,
+            ))
+
+    # 2. Discordant playlists: playlists whose tracks are scattered across many clusters
+    for pid, tids in playlist_tracks.items():
+        # Only consider tracks that have UMAP coordinates
+        mapped_tids = [tid for tid in tids if tid in label_map]
+        if len(mapped_tids) < 5:
+            continue
+
+        cluster_labels = [label_map[tid] for tid in mapped_tids]
+        non_noise = [l for l in cluster_labels if l != -1]
+        if len(non_noise) < 3:
+            continue
+
+        unique_clusters = set(non_noise)
+        scatter_ratio = len(unique_clusters) / len(non_noise)
+
+        if scatter_ratio > 0.5 and len(unique_clusters) >= 3:
+            insights.append(ClusterInsight(
+                type="discordant_playlist",
+                title=pid,  # Will be resolved to name on the client
+                description=f"{len(mapped_tids)} tracks spread across {len(unique_clusters)} clusters "
+                            f"(scatter ratio: {scatter_ratio:.0%})",
+                track_ids=mapped_tids,
+                score=scatter_ratio,
+            ))
+
+    # Sort: potential playlists by size desc, discordant by scatter desc
+    insights.sort(key=lambda i: -i.score)
+
+    return ClusterResponse(labels=label_map, insights=insights)
+
+
+@app.post("/cluster", response_model=ClusterResponse)
+async def compute_clusters(request: ClusterRequest):
+    """Run HDBSCAN on UMAP coordinates. Returns cluster labels and insights."""
+    result = await asyncio.to_thread(
+        _compute_clusters,
+        request.coordinates,
+        request.playlist_tracks,
+        request.min_cluster_size,
+    )
+    return result
+
+
 # ─── Cached features ─────────────────────────────────────────────────────────
 
 
