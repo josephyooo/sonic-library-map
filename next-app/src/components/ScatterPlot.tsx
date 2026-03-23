@@ -24,6 +24,7 @@ interface HoveredPoint {
 interface ScatterPlotProps {
   points: PlotPoint[];
   playlistColors: PlaylistColor[];
+  highlightedTracks?: Set<string> | null;
   onHover: (info: HoveredPoint | null) => void;
   onClick: (point: PlotPoint) => void;
   xLabel: string;
@@ -41,6 +42,7 @@ export default function ScatterPlot({
   xLabel,
   yLabel,
   xFormat,
+  highlightedTracks,
 }: ScatterPlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -193,12 +195,13 @@ export default function ScatterPlot({
         continue;
 
       const isHovered = hovered?.id === point.id;
+      const isHighlighted = !highlightedTracks || highlightedTracks.has(point.id);
       const r = isHovered ? HOVER_RADIUS : POINT_RADIUS;
 
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.globalAlpha = isHovered ? 1 : 0.7;
+      ctx.globalAlpha = isHovered ? 1 : isHighlighted ? 0.7 : 0.1;
       ctx.fill();
 
       if (isHovered) {
@@ -208,7 +211,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, xLabel, yLabel, xFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, xLabel, yLabel, xFormat]);
 
   useEffect(() => {
     const container = containerRef.current;

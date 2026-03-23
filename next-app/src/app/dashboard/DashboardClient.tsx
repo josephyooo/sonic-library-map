@@ -11,6 +11,7 @@ import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
+import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
 
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
@@ -40,6 +41,9 @@ export default function DashboardClient() {
   const [genreLoading, setGenreLoading] = useState(false);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
   const cachedFeaturesLoaded = useRef(false);
+  const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
+  const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
+  const clusterFetched = useRef(false);
 
   // Auto-load cached features when UMAP is first selected
   useEffect(() => {
@@ -75,6 +79,37 @@ export default function DashboardClient() {
     })();
   }, [viewMode, libraryData]);
 
+  // Fetch clusters when UMAP coordinates update (with enough tracks)
+  useEffect(() => {
+    if (!umapCoords || !libraryData) return;
+    const coordCount = Object.keys(umapCoords).length;
+    if (coordCount < 20) return;
+
+    // Only re-fetch if coords changed significantly
+    clusterFetched.current = false;
+
+    (async () => {
+      if (clusterFetched.current) return;
+      clusterFetched.current = true;
+      try {
+        const response = await fetch("/api/cluster", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            coordinates: umapCoords,
+            playlist_tracks: libraryData.playlistTracks,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setClusterInsights(data.insights ?? []);
+        }
+      } catch (err) {
+        console.error("Cluster fetch error:", err);
+      }
+    })();
+  }, [umapCoords, libraryData]);
+
   const playlists = useMemo(() => {
     if (!libraryData) return [];
     const seen = new Set<string>();
@@ -100,6 +135,17 @@ export default function DashboardClient() {
     }
     return map;
   }, [libraryData]);
+
+  const trackLookup = useMemo(() => {
+    if (!libraryData) return new Map();
+    const m = new Map<string, typeof libraryData.tracks[0]>();
+    for (const t of libraryData.tracks) m.set(t.id, t);
+    return m;
+  }, [libraryData]);
+
+  const handleHighlight = useCallback((trackIds: string[] | null) => {
+    setHighlightedTracks(trackIds ? new Set(trackIds) : null);
+  }, []);
 
   // Active coordinate set based on view mode
   const activeCoords = viewMode === "umap" ? umapCoords
@@ -246,6 +292,7 @@ export default function DashboardClient() {
         <ScatterPlot
           points={points}
           playlistColors={playlistColors}
+          highlightedTracks={highlightedTracks}
           onHover={setHovered}
           onClick={handleClick}
           xLabel={axisLabels.x}
@@ -283,13 +330,23 @@ export default function DashboardClient() {
         )}
       </div>
 
-      <div className="w-56">
+      <div className="flex w-56 flex-col overflow-y-auto">
         <PlaylistLegend
           playlists={playlistColors}
           onToggle={handleToggle}
           onShowAll={handleShowAll}
           onHideAll={handleHideAll}
         />
+        {viewMode === "umap" && clusterInsights.length > 0 && (
+          <div className="border-t border-zinc-800">
+            <ClusterPanel
+              insights={clusterInsights}
+              trackLookup={trackLookup}
+              playlistNames={playlistNames}
+              onHighlight={handleHighlight}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
