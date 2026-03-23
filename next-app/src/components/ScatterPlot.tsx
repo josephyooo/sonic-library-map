@@ -196,17 +196,18 @@ export default function ScatterPlot({
 
       const isHovered = hovered?.id === point.id;
       const isHighlighted = !highlightedTracks || highlightedTracks.has(point.id);
-      const r = isHovered ? HOVER_RADIUS : POINT_RADIUS;
+      const r = isHovered ? HOVER_RADIUS : isHighlighted && highlightedTracks ? POINT_RADIUS + 1.5 : POINT_RADIUS;
 
       ctx.beginPath();
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.globalAlpha = isHovered ? 1 : isHighlighted ? 0.7 : 0.1;
+      ctx.globalAlpha = isHovered ? 1 : isHighlighted ? (highlightedTracks ? 1 : 0.7) : 0.15;
       ctx.fill();
 
-      if (isHovered) {
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2;
+      if (isHovered || (isHighlighted && highlightedTracks)) {
+        ctx.strokeStyle = isHovered ? "#fff" : color;
+        ctx.lineWidth = isHovered ? 2 : 1;
+        ctx.globalAlpha = 1;
         ctx.stroke();
       }
     }
