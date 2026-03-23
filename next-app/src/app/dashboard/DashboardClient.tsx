@@ -31,6 +31,8 @@ export default function DashboardClient() {
   const [playlistVisibility, setPlaylistVisibility] = useState<
     Record<string, boolean>
   >({});
+  const [umapCoords, setUmapCoords] = useState<Record<string, [number, number]> | null>(null);
+  const [umapLoading, setUmapLoading] = useState(false);
 
   const playlists = useMemo(() => {
     if (!libraryData) return [];
@@ -75,14 +77,19 @@ export default function DashboardClient() {
 
   const points = useMemo((): PlotPoint[] => {
     if (!libraryData) return [];
-    return libraryData.tracks.map((track) => ({
-      id: track.id,
-      x: parseReleaseYear(track.album.release_date),
-      y: track.popularity,
-      track,
-      playlistIds: trackPlaylistMap.get(track.id) ?? [],
-    }));
-  }, [libraryData, trackPlaylistMap]);
+    return libraryData.tracks
+      .filter((track) => !umapCoords || track.id in umapCoords)
+      .map((track) => {
+        const coord = umapCoords?.[track.id];
+        return {
+          id: track.id,
+          x: coord ? coord[0] : parseReleaseYear(track.album.release_date),
+          y: coord ? coord[1] : track.popularity,
+          track,
+          playlistIds: trackPlaylistMap.get(track.id) ?? [],
+        };
+      });
+  }, [libraryData, trackPlaylistMap, umapCoords]);
 
   const handleToggle = useCallback((id: string) => {
     setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -102,6 +109,29 @@ export default function DashboardClient() {
     window.open(point.track.external_urls.spotify, "_blank");
   }, []);
 
+  const handleFeaturesReady = useCallback(
+    async (features: Record<string, number[]>) => {
+      if (!libraryData) return;
+      setUmapLoading(true);
+      try {
+        const trackIds = libraryData.tracks.map((t) => t.id);
+        const response = await fetch("/api/umap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ track_ids: trackIds, features }),
+        });
+        if (!response.ok) throw new Error(`UMAP failed: ${response.status}`);
+        const data = await response.json();
+        setUmapCoords(data.coordinates);
+      } catch (err) {
+        console.error("UMAP error:", err);
+      } finally {
+        setUmapLoading(false);
+      }
+    },
+    [libraryData],
+  );
+
   if (!libraryData) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -118,9 +148,9 @@ export default function DashboardClient() {
           playlistColors={playlistColors}
           onHover={setHovered}
           onClick={handleClick}
-          xLabel="Release Year"
-          yLabel="Popularity"
-          xFormat={formatYear}
+          xLabel={umapCoords ? "UMAP 1" : "Release Year"}
+          yLabel={umapCoords ? "UMAP 2" : "Popularity"}
+          xFormat={umapCoords ? undefined : formatYear}
         />
         <div className="absolute left-4 top-4 flex flex-col gap-3">
           <div className="flex gap-3">
@@ -129,8 +159,17 @@ export default function DashboardClient() {
             <StatBadge label="Artists" value={libraryData.artists.length} />
           </div>
           <div className="w-0 min-w-full">
-            <FeatureExtractor libraryData={libraryData} />
+            <FeatureExtractor
+              libraryData={libraryData}
+              onFeaturesReady={handleFeaturesReady}
+            />
           </div>
+          {umapLoading && (
+            <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 backdrop-blur-sm">
+              <div className="h-3 w-3 animate-spin rounded-full border border-zinc-600 border-t-green-500" />
+              <span className="text-xs text-zinc-400">Computing UMAP...</span>
+            </div>
+          )}
         </div>
         {hovered && (
           <SongTooltip info={hovered} playlistNames={playlistNames} />

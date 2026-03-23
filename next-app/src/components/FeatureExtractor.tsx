@@ -13,10 +13,12 @@ interface Progress {
 
 interface FeatureExtractorProps {
   libraryData: LibraryData;
+  onFeaturesReady: (features: Record<string, number[]>) => void;
 }
 
 export default function FeatureExtractor({
   libraryData,
+  onFeaturesReady,
 }: FeatureExtractorProps) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [running, setRunning] = useState(false);
@@ -92,6 +94,9 @@ export default function FeatureExtractor({
               failed: data.failed,
               total: data.total,
             });
+            if (data.features && Object.keys(data.features).length > 0) {
+              onFeaturesReady(data.features);
+            }
           }
         }
       }
@@ -101,7 +106,7 @@ export default function FeatureExtractor({
     } finally {
       setRunning(false);
     }
-  }, [libraryData]);
+  }, [libraryData, onFeaturesReady]);
 
   const percentage = progress
     ? Math.round((progress.current / progress.total) * 100)
