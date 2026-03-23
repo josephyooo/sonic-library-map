@@ -45,7 +45,7 @@ export default function FeatureExtractor({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    const tracks = libraryData.tracks.map((t) => ({
+    const allTracks = libraryData.tracks.map((t) => ({
       spotify_id: t.id,
       name: t.name,
       artist: t.artists[0]?.name ?? "Unknown",
@@ -53,10 +53,41 @@ export default function FeatureExtractor({
     }));
 
     try {
+      // Bulk-load cached features first (instant)
+      const accumulated: Record<string, number[]> = {};
+      const cachedResponse = await fetch("/api/features", {
+        signal: controller.signal,
+      });
+      if (cachedResponse.ok) {
+        const cachedData = await cachedResponse.json();
+        if (cachedData.features) {
+          Object.assign(accumulated, cachedData.features);
+          if (Object.keys(accumulated).length >= 5) {
+            onFeaturesReady({ ...accumulated });
+          }
+        }
+      }
+
+      // Only send uncached tracks to the extraction endpoint
+      const cachedIds = new Set(Object.keys(accumulated));
+      const uncachedTracks = allTracks.filter(
+        (t) => !cachedIds.has(t.spotify_id),
+      );
+
+      if (uncachedTracks.length === 0) {
+        setResult({
+          extracted: Object.keys(accumulated).length,
+          failed: 0,
+          total: allTracks.length,
+        });
+        setRunning(false);
+        return;
+      }
+
       const response = await fetch("/api/features", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tracks }),
+        body: JSON.stringify({ tracks: uncachedTracks }),
         signal: controller.signal,
       });
 
@@ -70,8 +101,8 @@ export default function FeatureExtractor({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      const accumulated: Record<string, number[]> = {};
-      let lastUpdateCount = 0;
+      // accumulated was pre-loaded with cached features above
+      let lastUpdateCount = Object.keys(accumulated).length;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -88,11 +119,12 @@ export default function FeatureExtractor({
           const data = JSON.parse(dataLine.slice(6));
 
           if (data.type === "progress") {
+            const cachedCount = Object.keys(accumulated).length - (data.extracted ?? 0);
             setProgress({
               message: data.message,
-              current: data.current,
-              total: data.total,
-              extracted: data.extracted,
+              current: cachedCount + data.current,
+              total: cachedCount + data.total,
+              extracted: cachedCount + (data.extracted ?? 0),
               failed: data.failed,
             });
 
@@ -109,14 +141,14 @@ export default function FeatureExtractor({
               onFeaturesReady({ ...accumulated });
             }
           } else if (data.type === "complete") {
-            setResult({
-              extracted: data.extracted,
-              failed: data.failed,
-              total: data.total,
-            });
             if (data.features) {
               Object.assign(accumulated, data.features);
             }
+            setResult({
+              extracted: Object.keys(accumulated).length,
+              failed: data.failed,
+              total: allTracks.length,
+            });
             if (Object.keys(accumulated).length > 0) {
               onFeaturesReady({ ...accumulated });
             }
