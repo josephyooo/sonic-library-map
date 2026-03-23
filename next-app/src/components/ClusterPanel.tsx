@@ -24,7 +24,7 @@ export default function ClusterPanel({
   playlistNames,
   onHighlight,
 }: ClusterPanelProps) {
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const potentials = insights.filter((i) => i.type === "potential_playlist");
   const discordants = insights.filter((i) => i.type === "discordant_playlist");
@@ -82,8 +82,8 @@ function InsightSection({
   insights: ClusterInsight[];
   trackLookup: Map<string, SpotifyTrack>;
   playlistNames: Map<string, string>;
-  expanded: number | null;
-  onExpand: (idx: number | null) => void;
+  expanded: string | null;
+  onExpand: (key: string | null) => void;
   onHighlight: (trackIds: string[] | null) => void;
 }) {
   return (
@@ -92,6 +92,7 @@ function InsightSection({
       <p className="mb-2 text-xs text-zinc-600">{subtitle}</p>
       <div className="space-y-1.5">
         {insights.map((insight, idx) => {
+          const key = `${insight.type}_${idx}`;
           const resolvedTitle =
             insight.type === "discordant_playlist"
               ? playlistNames.get(insight.title) ?? insight.title
@@ -99,13 +100,13 @@ function InsightSection({
 
           return (
             <InsightCard
-              key={idx}
-              idx={idx}
+              key={key}
+              cardKey={key}
               title={resolvedTitle}
               description={insight.description}
               trackIds={insight.track_ids}
               trackLookup={trackLookup}
-              isExpanded={expanded === idx}
+              isExpanded={expanded === key}
               onExpand={onExpand}
               onHighlight={onHighlight}
             />
@@ -117,7 +118,7 @@ function InsightSection({
 }
 
 function InsightCard({
-  idx,
+  cardKey,
   title,
   description,
   trackIds,
@@ -126,13 +127,13 @@ function InsightCard({
   onExpand,
   onHighlight,
 }: {
-  idx: number;
+  cardKey: string;
   title: string;
   description: string;
   trackIds: string[];
   trackLookup: Map<string, SpotifyTrack>;
   isExpanded: boolean;
-  onExpand: (idx: number | null) => void;
+  onExpand: (key: string | null) => void;
   onHighlight: (trackIds: string[] | null) => void;
 }) {
   const handleClick = useCallback(() => {
@@ -140,10 +141,10 @@ function InsightCard({
       onExpand(null);
       onHighlight(null);
     } else {
-      onExpand(idx);
+      onExpand(cardKey);
       onHighlight(trackIds);
     }
-  }, [isExpanded, idx, trackIds, onExpand, onHighlight]);
+  }, [isExpanded, cardKey, trackIds, onExpand, onHighlight]);
 
   return (
     <div
