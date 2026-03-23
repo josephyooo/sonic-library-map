@@ -13,6 +13,7 @@ import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay, { OVERLAY_FEATURES } from "@/components/FeatureOverlay";
+import AxisSelector, { AXIS_YEAR, AXIS_POPULARITY } from "@/components/AxisSelector";
 import { handleApiError, parseAxisLabel } from "@/lib/api";
 import * as d3 from "d3";
 
@@ -24,6 +25,14 @@ const PALETTE = [
 ];
 
 const formatYear = (tick: number) => String(Math.round(tick));
+
+/** Tick formatters for raw feature axes. BPM is stored as bpm/250. */
+const AXIS_TICK_FORMATTERS: Record<number, (v: number) => string> = {
+  27: (v) => `${Math.round(v * 250)}`,       // BPM (stored normalized)
+  26: (v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`, // Brightness (Hz)
+  39: (v) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`, // High-Freq Energy (Hz)
+  32: (v) => `${v.toFixed(0)}`,               // Loudness (LUFS)
+};
 
 function parseReleaseYear(date: string): number {
   const year = parseInt(date.slice(0, 4), 10);
@@ -52,6 +61,8 @@ export default function DashboardClient() {
   const cachedFeaturesLoaded = useRef(false);
   const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
   const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
+  const [customXIdx, setCustomXIdx] = useState(AXIS_YEAR);
+  const [customYIdx, setCustomYIdx] = useState(AXIS_POPULARITY);
 
   // Auto-load cached features when UMAP is first selected
   useEffect(() => {
@@ -169,14 +180,39 @@ export default function DashboardClient() {
     setHighlightedTracks(trackIds ? new Set(trackIds) : null);
   }, []);
 
+  // Custom axes: build coordinate map from raw features or track metadata
+  const customCoords = useMemo((): Record<string, [number, number]> | null => {
+    if (viewMode !== "custom" || !libraryData) return null;
+    const tracks = libraryData.tracks;
+
+    function getVal(track: typeof tracks[0], idx: number): number | null {
+      if (idx === AXIS_YEAR) return parseReleaseYear(track.album.release_date);
+      if (idx === AXIS_POPULARITY) return track.popularity;
+      // Raw feature index
+      if (!rawFeatures) return null;
+      const feats = rawFeatures[track.id];
+      return feats?.[idx] ?? null;
+    }
+
+    const coords: Record<string, [number, number]> = {};
+    for (const track of tracks) {
+      const x = getVal(track, customXIdx);
+      const y = getVal(track, customYIdx);
+      if (x !== null && y !== null) coords[track.id] = [x, y];
+    }
+    return Object.keys(coords).length > 0 ? coords : null;
+  }, [viewMode, libraryData, rawFeatures, customXIdx, customYIdx]);
+
   // Active coordinate set based on view mode
   const activeCoords = viewMode === "umap" ? umapCoords
     : viewMode === "genre" ? genreCoords
+    : viewMode === "custom" ? customCoords
     : null;
 
-  // In UMAP/Genre mode with no coords, show empty plot (no fallback)
+  // In coord-based modes with no coords, show empty plot (no fallback)
   const showEmptyPlot = (viewMode === "umap" && !umapCoords)
-    || (viewMode === "genre" && !genreCoords);
+    || (viewMode === "genre" && !genreCoords)
+    || (viewMode === "custom" && !customCoords);
 
   // Filter playlists to only those with at least one visible track in the current view
   const visiblePlaylists = useMemo(() => {
@@ -230,8 +266,25 @@ export default function DashboardClient() {
       return { x: xLabel, y: yLabel };
     }
     if (viewMode === "genre") return { x: "Dense ← → Spiky", y: "Organic ← → Electronic" };
+    if (viewMode === "custom") {
+      const nameFor = (idx: number) => {
+        if (idx === AXIS_YEAR) return "Release Year";
+        if (idx === AXIS_POPULARITY) return "Popularity";
+        return OVERLAY_FEATURES.find((f) => f.idx === idx)?.name ?? "?";
+      };
+      return { x: nameFor(customXIdx), y: nameFor(customYIdx) };
+    }
     return { x: "Release Year", y: "Popularity" };
-  }, [viewMode, umapAxisLabels]);
+  }, [viewMode, umapAxisLabels, customXIdx, customYIdx]);
+
+  const customAxisFormats = useMemo(() => {
+    if (viewMode !== "custom") return { x: undefined, y: undefined };
+    const fmtFor = (idx: number) => {
+      if (idx === AXIS_YEAR) return formatYear;
+      return AXIS_TICK_FORMATTERS[idx];
+    };
+    return { x: fmtFor(customXIdx), y: fmtFor(customYIdx) };
+  }, [viewMode, customXIdx, customYIdx]);
 
   // Feature color overlay: map track ID -> color + normalized value (0-1)
   const { featureColorMap, featureValueMap } = useMemo(() => {
@@ -246,7 +299,7 @@ export default function DashboardClient() {
     if (values.length === 0)
       return { featureColorMap: null, featureValueMap: null };
     const extent = d3.extent(values, (v) => v.val) as [number, number];
-    const colorScale = d3.scaleSequential(d3.interpolateTurbo).domain(extent);
+    const colorScale = d3.scaleSequential(d3.interpolateViridis).domain(extent);
     const normScale = d3.scaleLinear().domain(extent).range([0, 1]);
     const cMap = new Map<string, string>();
     const vMap = new Map<string, number>();
@@ -363,13 +416,16 @@ export default function DashboardClient() {
           onClick={handleClick}
           xLabel={axisLabels.x}
           yLabel={axisLabels.y}
-          xFormat={viewMode === "default" ? formatYear : undefined}
+          xFormat={viewMode === "default" ? formatYear : customAxisFormats.x}
+          yFormat={customAxisFormats.y}
         />
         {points.length === 0 && !umapLoading && !genreLoading && viewMode !== "default" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <p className="text-sm text-zinc-400">
               {viewMode === "umap"
                 ? "No audio features extracted yet. Click \u2018Resume extraction\u2019 to start."
+                : viewMode === "custom"
+                ? "No audio features extracted yet. Extract features in UMAP mode first."
                 : "No genre data available for your tracks."}
             </p>
           </div>
@@ -389,6 +445,14 @@ export default function DashboardClient() {
             <FeatureOverlay
               selected={colorFeatureIdx}
               onChange={setColorFeatureIdx}
+            />
+          )}
+          {viewMode === "custom" && (
+            <AxisSelector
+              xIdx={customXIdx}
+              yIdx={customYIdx}
+              onChangeX={setCustomXIdx}
+              onChangeY={setCustomYIdx}
             />
           )}
           <div className="w-0 min-w-full">

@@ -1,6 +1,6 @@
 "use client";
 
-export type ViewMode = "default" | "umap" | "genre";
+export type ViewMode = "default" | "umap" | "genre" | "custom";
 
 interface ViewToggleProps {
   current: ViewMode;
@@ -33,6 +33,12 @@ export default function ViewToggle({
         onClick={() => onChange("genre")}
       >
         Genre
+      </ToggleButton>
+      <ToggleButton
+        active={current === "custom"}
+        onClick={() => onChange("custom")}
+      >
+        Custom
       </ToggleButton>
     </div>
   );

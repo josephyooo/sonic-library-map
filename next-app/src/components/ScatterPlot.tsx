@@ -32,6 +32,7 @@ interface ScatterPlotProps {
   xLabel: string;
   yLabel: string;
   xFormat?: (tick: number) => string;
+  yFormat?: (tick: number) => string;
 }
 
 export type { HoveredPoint };
@@ -44,6 +45,7 @@ export default function ScatterPlot({
   xLabel,
   yLabel,
   xFormat,
+  yFormat,
   highlightedTracks,
   featureColorMap,
   featureValueMap,
@@ -127,7 +129,7 @@ export default function ScatterPlot({
     ctx.fillStyle = themeColors.base;
     ctx.fillRect(0, 0, size.width, size.height);
 
-    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat, themeColors);
+    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat, yFormat, themeColors);
 
     // Draw feature heatmap gradient when a feature overlay is active
     if (featureValueMap && featureValueMap.size > 0) {
@@ -168,7 +170,7 @@ export default function ScatterPlot({
 
             if (weightSum > 0) {
               const t = valSum / weightSum;
-              ctx.fillStyle = d3.interpolateTurbo(t);
+              ctx.fillStyle = d3.interpolateViridis(t);
               ctx.globalAlpha = Math.min(weightSum * 0.15, 0.35);
               ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
             }
@@ -277,7 +279,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, featureValueMap, xLabel, yLabel, xFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, featureValueMap, xLabel, yLabel, xFormat, yFormat]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -403,6 +405,7 @@ function drawAxes(
   xLabel: string,
   yLabel: string,
   xFormat?: (tick: number) => string,
+  yFormat?: (tick: number) => string,
   theme?: { base: string; surface0: string; overlay0: string; subtext0: string; text: string },
 ) {
   const gridColor = theme?.surface0 ?? "#27272a";
@@ -412,6 +415,7 @@ function drawAxes(
   const xTicks = xs.ticks(8);
   const yTicks = ys.ticks(6);
   const formatX = xFormat ?? ((t: number) => t.toFixed(1));
+  const formatY = yFormat ?? ((t: number) => String(Math.round(t)));
 
   ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
@@ -439,7 +443,7 @@ function drawAxes(
     ctx.moveTo(50, py);
     ctx.lineTo(size.width - 10, py);
     ctx.stroke();
-    ctx.fillText(String(Math.round(tick)), 45, py + 4);
+    ctx.fillText(formatY(tick), 45, py + 4);
   }
 
   ctx.fillStyle = labelColor;
