@@ -4,16 +4,12 @@ export type ViewMode = "default" | "umap" | "genre";
 
 interface ViewToggleProps {
   current: ViewMode;
-  umapAvailable: boolean;
-  genreAvailable: boolean;
   genreLoading: boolean;
   onChange: (mode: ViewMode) => void;
 }
 
 export default function ViewToggle({
   current,
-  umapAvailable,
-  genreAvailable,
   genreLoading,
   onChange,
 }: ViewToggleProps) {
@@ -27,7 +23,6 @@ export default function ViewToggle({
       </ToggleButton>
       <ToggleButton
         active={current === "umap"}
-        disabled={!umapAvailable}
         onClick={() => onChange("umap")}
       >
         UMAP
@@ -45,13 +40,11 @@ export default function ViewToggle({
 
 function ToggleButton({
   active,
-  disabled,
   loading,
   onClick,
   children,
 }: {
   active: boolean;
-  disabled?: boolean;
   loading?: boolean;
   onClick: () => void;
   children: React.ReactNode;
@@ -59,13 +52,10 @@ function ToggleButton({
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
       className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
         active
           ? "bg-green-600 text-white"
-          : disabled
-            ? "cursor-not-allowed text-zinc-600"
-            : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+          : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
       }`}
     >
       {loading ? (

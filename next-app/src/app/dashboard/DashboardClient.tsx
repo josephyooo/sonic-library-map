@@ -221,8 +221,6 @@ export default function DashboardClient() {
           </div>
           <ViewToggle
             current={viewMode}
-            umapAvailable={umapCoords !== null}
-            genreAvailable={genreCoords !== null}
             genreLoading={genreLoading}
             onChange={handleViewChange}
           />
