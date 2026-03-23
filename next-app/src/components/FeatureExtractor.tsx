@@ -15,11 +15,15 @@ interface Progress {
 
 interface FeatureExtractorProps {
   libraryData: LibraryData;
+  cachedCount: number;
+  showButton: boolean;
   onFeaturesReady: (features: Record<string, number[]>) => void;
 }
 
 export default function FeatureExtractor({
   libraryData,
+  cachedCount,
+  showButton,
   onFeaturesReady,
 }: FeatureExtractorProps) {
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -42,11 +46,11 @@ export default function FeatureExtractor({
     abortRef.current = controller;
 
     const tracks = libraryData.tracks.map((t) => ({
-        spotify_id: t.id,
-        name: t.name,
-        artist: t.artists[0]?.name ?? "Unknown",
-        duration_ms: t.duration_ms,
-      }));
+      spotify_id: t.id,
+      name: t.name,
+      artist: t.artists[0]?.name ?? "Unknown",
+      duration_ms: t.duration_ms,
+    }));
 
     try {
       const response = await fetch("/api/features", {
@@ -92,12 +96,10 @@ export default function FeatureExtractor({
               failed: data.failed,
             });
 
-            // Accumulate features from progress events
             if (data.feature) {
               Object.assign(accumulated, data.feature);
             }
 
-            // Trigger UMAP update every N extracted tracks
             const count = Object.keys(accumulated).length;
             if (
               count >= 5 &&
@@ -112,7 +114,6 @@ export default function FeatureExtractor({
               failed: data.failed,
               total: data.total,
             });
-            // Final update with all features
             if (data.features) {
               Object.assign(accumulated, data.features);
             }
@@ -134,31 +135,10 @@ export default function FeatureExtractor({
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 
-  return (
-    <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 backdrop-blur-sm">
-      <h3 className="mb-2 text-xs font-medium text-zinc-400">
-        Audio Features
-      </h3>
-
-      {result ? (
-        <div className="text-xs text-zinc-300">
-          <span className="font-medium text-green-400">
-            {result.extracted.toLocaleString()}
-          </span>{" "}
-          extracted
-          {result.failed > 0 && (
-            <>
-              {" / "}
-              <span className="text-red-400">
-                {result.failed.toLocaleString()}
-              </span>{" "}
-              failed
-            </>
-          )}
-          {" / "}
-          {result.total.toLocaleString()} total
-        </div>
-      ) : running ? (
+  // Progress bar is always visible when running (regardless of view mode)
+  if (running) {
+    return (
+      <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 backdrop-blur-sm">
         <div className="space-y-1.5">
           <p className="truncate text-xs text-zinc-400" title={progress?.message}>
             {progress?.message ?? "Starting..."}
@@ -179,7 +159,41 @@ export default function FeatureExtractor({
             </span>
           </div>
         </div>
-      ) : error ? (
+      </div>
+    );
+  }
+
+  // Result summary after extraction completes
+  if (result) {
+    return (
+      <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 backdrop-blur-sm">
+        <div className="text-xs text-zinc-300">
+          <span className="font-medium text-green-400">
+            {result.extracted.toLocaleString()}
+          </span>{" "}
+          extracted
+          {result.failed > 0 && (
+            <>
+              {" / "}
+              <span className="text-red-400">
+                {result.failed.toLocaleString()}
+              </span>{" "}
+              failed
+            </>
+          )}
+          {" / "}
+          {result.total.toLocaleString()} total
+        </div>
+      </div>
+    );
+  }
+
+  // Button only visible when showButton is true (UMAP mode)
+  if (!showButton) return null;
+
+  if (error) {
+    return (
+      <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 backdrop-blur-sm">
         <div className="space-y-2">
           <p className="text-xs text-red-400">{error}</p>
           <button
@@ -189,14 +203,18 @@ export default function FeatureExtractor({
             Retry
           </button>
         </div>
-      ) : (
-        <button
-          onClick={startExtraction}
-          className="rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-500"
-        >
-          Extract from YouTube Music
-        </button>
-      )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-900/80 p-3 backdrop-blur-sm">
+      <button
+        onClick={startExtraction}
+        className="rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-500"
+      >
+        {cachedCount > 0 ? "Resume extraction" : "Extract from YouTube Music"}
+      </button>
     </div>
   );
 }

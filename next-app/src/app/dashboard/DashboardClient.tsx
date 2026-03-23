@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import type { LibraryData, PlotPoint } from "@/lib/types";
 import LibraryLoader from "@/components/LibraryLoader";
 import ScatterPlot, {
@@ -38,6 +38,42 @@ export default function DashboardClient() {
   const umapAbortRef = useRef<AbortController | null>(null);
   const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
+  const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
+  const cachedFeaturesLoaded = useRef(false);
+
+  // Auto-load cached features when UMAP is first selected
+  useEffect(() => {
+    if (viewMode !== "umap" || cachedFeaturesLoaded.current || !libraryData) return;
+    cachedFeaturesLoaded.current = true;
+
+    (async () => {
+      try {
+        const response = await fetch("/api/features");
+        if (!response.ok) return;
+        const data = await response.json();
+        const count = data.count ?? 0;
+        setCachedFeatureCount(count);
+
+        if (count >= 5) {
+          // Compute UMAP from cached features
+          const trackIds = libraryData.tracks.map((t) => t.id);
+          setUmapLoading(true);
+          const umapResponse = await fetch("/api/umap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ track_ids: trackIds, features: data.features }),
+          });
+          if (umapResponse.ok) {
+            const umapData = await umapResponse.json();
+            setUmapCoords(umapData.coordinates);
+          }
+          setUmapLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to load cached features:", err);
+      }
+    })();
+  }, [viewMode, libraryData]);
 
   const playlists = useMemo(() => {
     if (!libraryData) return [];
@@ -70,15 +106,19 @@ export default function DashboardClient() {
     : viewMode === "genre" ? genreCoords
     : null;
 
+  // In UMAP/Genre mode with no coords, show empty plot (no fallback)
+  const showEmptyPlot = (viewMode === "umap" && !umapCoords)
+    || (viewMode === "genre" && !genreCoords);
+
   // Filter playlists to only those with at least one visible track in the current view
   const visiblePlaylists = useMemo(() => {
-    if (!activeCoords || !libraryData) return playlists;
+    if (!activeCoords || !libraryData) return showEmptyPlot ? [] : playlists;
     return playlists.filter((p) => {
       const trackIds = libraryData.playlistTracks[p.id];
       if (!trackIds) return false;
       return trackIds.some((tid) => tid in activeCoords);
     });
-  }, [playlists, activeCoords, libraryData]);
+  }, [playlists, activeCoords, libraryData, showEmptyPlot]);
 
   const playlistColors = useMemo((): PlaylistColor[] => {
     return visiblePlaylists.map((p, i) => ({
@@ -96,7 +136,7 @@ export default function DashboardClient() {
   }, [visiblePlaylists]);
 
   const points = useMemo((): PlotPoint[] => {
-    if (!libraryData) return [];
+    if (!libraryData || showEmptyPlot) return [];
     return libraryData.tracks
       .filter((track) => !activeCoords || track.id in activeCoords)
       .map((track) => {
@@ -109,13 +149,13 @@ export default function DashboardClient() {
           playlistIds: trackPlaylistMap.get(track.id) ?? [],
         };
       });
-  }, [libraryData, trackPlaylistMap, activeCoords]);
+  }, [libraryData, trackPlaylistMap, activeCoords, showEmptyPlot]);
 
   const axisLabels = useMemo(() => {
-    if (viewMode === "umap" && umapCoords) return { x: "UMAP 1", y: "UMAP 2" };
-    if (viewMode === "genre" && genreCoords) return { x: "Dense ← → Spiky", y: "Organic ← → Electronic" };
+    if (viewMode === "umap") return { x: "UMAP 1", y: "UMAP 2" };
+    if (viewMode === "genre") return { x: "Dense ← → Spiky", y: "Organic ← → Electronic" };
     return { x: "Release Year", y: "Popularity" };
-  }, [viewMode, umapCoords, genreCoords]);
+  }, [viewMode]);
 
   const handleToggle = useCallback((id: string) => {
     setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -139,6 +179,8 @@ export default function DashboardClient() {
     async (features: Record<string, number[]>) => {
       if (!libraryData) return;
 
+      setCachedFeatureCount(Object.keys(features).length);
+
       umapAbortRef.current?.abort();
       const controller = new AbortController();
       umapAbortRef.current = controller;
@@ -156,8 +198,6 @@ export default function DashboardClient() {
         const data = await response.json();
         if (!controller.signal.aborted) {
           setUmapCoords(data.coordinates);
-          // Auto-switch to UMAP view on first result
-          setViewMode((prev) => (prev === "default" ? "umap" : prev));
         }
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -175,7 +215,6 @@ export default function DashboardClient() {
     async (mode: ViewMode) => {
       setViewMode(mode);
 
-      // Fetch genre coordinates on first switch to genre view
       if (mode === "genre" && !genreCoords && !genreLoading) {
         setGenreLoading(true);
         try {
@@ -216,7 +255,7 @@ export default function DashboardClient() {
         <div className="absolute left-4 top-4 flex flex-col gap-3">
           <div className="flex gap-3">
             <StatBadge label="Tracks" value={points.length} />
-            <StatBadge label="Playlists" value={playlists.length} />
+            <StatBadge label="Playlists" value={visiblePlaylists.length} />
             <StatBadge label="Artists" value={libraryData.artists.length} />
           </div>
           <ViewToggle
@@ -227,6 +266,8 @@ export default function DashboardClient() {
           <div className="w-0 min-w-full">
             <FeatureExtractor
               libraryData={libraryData}
+              cachedCount={cachedFeatureCount}
+              showButton={viewMode === "umap"}
               onFeaturesReady={handleFeaturesReady}
             />
           </div>
