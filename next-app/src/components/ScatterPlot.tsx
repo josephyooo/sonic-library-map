@@ -6,7 +6,7 @@ import type { PlotPoint } from "@/lib/types";
 
 const POINT_RADIUS = 3;
 const HOVER_RADIUS = 6;
-const UNSAVED_COLOR = "#71717a";
+const UNSAVED_COLOR_FALLBACK = "#71717a";
 
 export interface PlaylistColor {
   id: string;
@@ -82,7 +82,7 @@ export default function ScatterPlot({
         const entry = colorMap.get(pid);
         if (entry?.visible) return entry.color;
       }
-      return UNSAVED_COLOR;
+      return UNSAVED_COLOR_FALLBACK;
     },
     [colorMap],
   );
@@ -114,10 +114,20 @@ export default function ScatterPlot({
 
     const transform = transformRef.current;
 
-    ctx.fillStyle = "#09090b";
+    // Read theme colors from CSS variables
+    const style = getComputedStyle(document.documentElement);
+    const themeColors = {
+      base: style.getPropertyValue("--ctp-base").trim(),
+      surface0: style.getPropertyValue("--ctp-surface0").trim(),
+      overlay0: style.getPropertyValue("--ctp-overlay0").trim(),
+      subtext0: style.getPropertyValue("--ctp-subtext0").trim(),
+      text: style.getPropertyValue("--ctp-text").trim(),
+    };
+
+    ctx.fillStyle = themeColors.base;
     ctx.fillRect(0, 0, size.width, size.height);
 
-    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat);
+    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat, themeColors);
 
     // Draw feature heatmap gradient when a feature overlay is active
     if (featureValueMap && featureValueMap.size > 0) {
@@ -285,6 +295,13 @@ export default function ScatterPlot({
     draw();
   }, [draw]);
 
+  // Redraw on window resize (used by theme toggle to refresh canvas colors)
+  useEffect(() => {
+    const handleResize = () => draw();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [draw]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || size.width === 0) return;
@@ -386,14 +403,19 @@ function drawAxes(
   xLabel: string,
   yLabel: string,
   xFormat?: (tick: number) => string,
+  theme?: { base: string; surface0: string; overlay0: string; subtext0: string; text: string },
 ) {
+  const gridColor = theme?.surface0 ?? "#27272a";
+  const tickColor = theme?.overlay0 ?? "#71717a";
+  const labelColor = theme?.subtext0 ?? "#a1a1aa";
+
   const xTicks = xs.ticks(8);
   const yTicks = ys.ticks(6);
   const formatX = xFormat ?? ((t: number) => t.toFixed(1));
 
-  ctx.strokeStyle = "#27272a";
+  ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
-  ctx.fillStyle = "#71717a";
+  ctx.fillStyle = tickColor;
   ctx.font = "11px ui-monospace, monospace";
   ctx.textAlign = "center";
 
@@ -420,7 +442,7 @@ function drawAxes(
     ctx.fillText(String(Math.round(tick)), 45, py + 4);
   }
 
-  ctx.fillStyle = "#a1a1aa";
+  ctx.fillStyle = labelColor;
   ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(xLabel, size.width / 2, size.height - 6);

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import DashboardClient from "./DashboardClient";
+import ThemeToggle from "@/components/ThemeToggle";
 
 export default async function Dashboard() {
   const session = await getSession();
@@ -10,19 +11,27 @@ export default async function Dashboard() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-white">
-      <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-        <h1 className="text-xl font-bold">Spotify Library Viz</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-zinc-400">
-            Logged in as{" "}
-            <span className="font-medium text-white">
-              {session.displayName}
-            </span>
+    <div
+      className="flex h-screen flex-col"
+      style={{ background: "var(--ctp-crust)", color: "var(--ctp-text)" }}
+    >
+      <header
+        className="flex items-center justify-between px-6 py-3"
+        style={{ borderBottom: "1px solid var(--ctp-surface0)" }}
+      >
+        <h1 className="text-lg font-bold">Spotify Library Viz</h1>
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <span className="text-sm" style={{ color: "var(--ctp-subtext0)" }}>
+            {session.displayName}
           </span>
           <a
             href="/api/auth/logout"
-            className="rounded-full border border-zinc-700 px-4 py-1.5 text-sm transition-colors hover:bg-zinc-800"
+            className="rounded-full px-3 py-1 text-sm transition-colors"
+            style={{
+              border: "1px solid var(--ctp-surface1)",
+              color: "var(--ctp-subtext1)",
+            }}
           >
             Log out
           </a>
