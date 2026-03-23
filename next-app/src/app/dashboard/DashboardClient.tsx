@@ -10,6 +10,7 @@ import ScatterPlot, {
 import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
+import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
@@ -31,9 +32,12 @@ export default function DashboardClient() {
   const [playlistVisibility, setPlaylistVisibility] = useState<
     Record<string, boolean>
   >({});
+  const [viewMode, setViewMode] = useState<ViewMode>("default");
   const [umapCoords, setUmapCoords] = useState<Record<string, [number, number]> | null>(null);
   const [umapLoading, setUmapLoading] = useState(false);
   const umapAbortRef = useRef<AbortController | null>(null);
+  const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
+  const [genreLoading, setGenreLoading] = useState(false);
 
   const playlists = useMemo(() => {
     if (!libraryData) return [];
@@ -76,12 +80,17 @@ export default function DashboardClient() {
     return m;
   }, [playlists]);
 
+  // Active coordinate set based on view mode
+  const activeCoords = viewMode === "umap" ? umapCoords
+    : viewMode === "genre" ? genreCoords
+    : null;
+
   const points = useMemo((): PlotPoint[] => {
     if (!libraryData) return [];
     return libraryData.tracks
-      .filter((track) => !umapCoords || track.id in umapCoords)
+      .filter((track) => !activeCoords || track.id in activeCoords)
       .map((track) => {
-        const coord = umapCoords?.[track.id];
+        const coord = activeCoords?.[track.id];
         return {
           id: track.id,
           x: coord ? coord[0] : parseReleaseYear(track.album.release_date),
@@ -90,7 +99,13 @@ export default function DashboardClient() {
           playlistIds: trackPlaylistMap.get(track.id) ?? [],
         };
       });
-  }, [libraryData, trackPlaylistMap, umapCoords]);
+  }, [libraryData, trackPlaylistMap, activeCoords]);
+
+  const axisLabels = useMemo(() => {
+    if (viewMode === "umap" && umapCoords) return { x: "UMAP 1", y: "UMAP 2" };
+    if (viewMode === "genre" && genreCoords) return { x: "Dense ← → Spiky", y: "Organic ← → Electronic" };
+    return { x: "Release Year", y: "Popularity" };
+  }, [viewMode, umapCoords, genreCoords]);
 
   const handleToggle = useCallback((id: string) => {
     setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -114,7 +129,6 @@ export default function DashboardClient() {
     async (features: Record<string, number[]>) => {
       if (!libraryData) return;
 
-      // Abort any in-flight UMAP request
       umapAbortRef.current?.abort();
       const controller = new AbortController();
       umapAbortRef.current = controller;
@@ -132,6 +146,8 @@ export default function DashboardClient() {
         const data = await response.json();
         if (!controller.signal.aborted) {
           setUmapCoords(data.coordinates);
+          // Auto-switch to UMAP view on first result
+          setViewMode((prev) => (prev === "default" ? "umap" : prev));
         }
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -143,6 +159,28 @@ export default function DashboardClient() {
       }
     },
     [libraryData],
+  );
+
+  const handleViewChange = useCallback(
+    async (mode: ViewMode) => {
+      setViewMode(mode);
+
+      // Fetch genre coordinates on first switch to genre view
+      if (mode === "genre" && !genreCoords && !genreLoading) {
+        setGenreLoading(true);
+        try {
+          const response = await fetch("/api/genres");
+          if (!response.ok) throw new Error(`Genres failed: ${response.status}`);
+          const data = await response.json();
+          setGenreCoords(data.coordinates);
+        } catch (err) {
+          console.error("Genre fetch error:", err);
+        } finally {
+          setGenreLoading(false);
+        }
+      }
+    },
+    [genreCoords, genreLoading],
   );
 
   if (!libraryData) {
@@ -161,9 +199,9 @@ export default function DashboardClient() {
           playlistColors={playlistColors}
           onHover={setHovered}
           onClick={handleClick}
-          xLabel={umapCoords ? "UMAP 1" : "Release Year"}
-          yLabel={umapCoords ? "UMAP 2" : "Popularity"}
-          xFormat={umapCoords ? undefined : formatYear}
+          xLabel={axisLabels.x}
+          yLabel={axisLabels.y}
+          xFormat={viewMode === "default" ? formatYear : undefined}
         />
         <div className="absolute left-4 top-4 flex flex-col gap-3">
           <div className="flex gap-3">
@@ -171,6 +209,13 @@ export default function DashboardClient() {
             <StatBadge label="Playlists" value={playlists.length} />
             <StatBadge label="Artists" value={libraryData.artists.length} />
           </div>
+          <ViewToggle
+            current={viewMode}
+            umapAvailable={umapCoords !== null}
+            genreAvailable={genreCoords !== null}
+            genreLoading={genreLoading}
+            onChange={handleViewChange}
+          />
           <div className="w-0 min-w-full">
             <FeatureExtractor
               libraryData={libraryData}
