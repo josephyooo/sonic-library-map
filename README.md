@@ -64,7 +64,7 @@ User  ->  Spotify OAuth login
       ->  Fetch saved tracks + playlists + artist genres  (paginated, rate-limited)
       ->  Cache in SQLite
       ->  Python sidecar: search YouTube Music  ->  download audio  ->  Essentia feature extraction
-      ->  Discard audio, cache features + YouTube link in SQLite
+      ->  Cache features + YouTube link in SQLite (audio retained during dev, discarded in prod)
       ->  UMAP on audio features  ->  2D coordinates
       ->  D3 renders interactive scatter plot with playlist boundaries
 ```
@@ -89,8 +89,9 @@ next-app/src/
     types.ts    -- shared TypeScript interfaces
 
 umap-service/
-  main.py       -- FastAPI: /umap, /cluster, /features, /health
-  cluster.py    -- HDBSCAN clustering
+  main.py         -- FastAPI: /umap, /cluster, /features, /health
+  tf_extract.py   -- Discogs-EffNet TF embedding extraction (1280-dim)
+  feature_extract.py -- Raw spectral feature extraction (41-dim)
   audio_source.py -- ytmusicapi search + yt-dlp download + SQLite cache
 ```
 
@@ -100,7 +101,7 @@ Phases 0 through 7 are complete. Feature extraction uses Discogs-EffNet TF embed
 
 ## Known limitations
 
-- **Spotify audio features unavailable**: Spotify deprecated the `/audio-features` endpoint for new apps in November 2024, and `preview_url` returns null for all tracks. Audio features are instead extracted via YouTube Music (search with ytmusicapi → download with yt-dlp → analyze with Essentia). Audio files are discarded after processing.
+- **Spotify audio features unavailable**: Spotify deprecated the `/audio-features` endpoint for new apps in November 2024, and `preview_url` returns null for all tracks. Audio features are instead extracted via YouTube Music (search with ytmusicapi → download with yt-dlp → analyze with Essentia). Audio files are retained during development (in `umap-service/data/audio/`) to avoid re-downloading during extraction pivots; production should delete after processing.
 - **YouTube Music browser auth expires**: The ytmusicapi browser auth cookies need periodic re-authentication.
 - **TF embeddings require re-extraction**: Existing tracks with only raw spectral features need re-download for Discogs-EffNet TF embedding extraction (YouTube links are cached, so search is skipped).
 

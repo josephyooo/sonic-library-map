@@ -4,8 +4,9 @@ Spotify's audio-features endpoint and preview_url are both unavailable for new a
 This module finds matching tracks on YouTube Music and downloads audio for
 feature extraction by Essentia (Phase 4b).
 
-Audio files are temporary — deleted after processing. Only the YouTube video ID
-and extracted features are cached.
+Audio files are retained during development (in data/audio/) to avoid re-downloading
+during extraction pivots. Production should delete after processing. YouTube video IDs
+and extracted features are cached indefinitely.
 """
 
 import json
