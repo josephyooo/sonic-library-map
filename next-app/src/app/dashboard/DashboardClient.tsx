@@ -9,6 +9,7 @@ import ScatterPlot, {
 } from "@/components/ScatterPlot";
 import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
+import FeatureExtractor from "@/components/FeatureExtractor";
 
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
@@ -121,10 +122,15 @@ export default function DashboardClient() {
           yLabel="Popularity"
           xFormat={formatYear}
         />
-        <div className="absolute left-4 top-4 flex gap-3">
-          <StatBadge label="Tracks" value={points.length} />
-          <StatBadge label="Playlists" value={playlists.length} />
-          <StatBadge label="Artists" value={libraryData.artists.length} />
+        <div className="absolute left-4 top-4 flex flex-col gap-3">
+          <div className="flex gap-3">
+            <StatBadge label="Tracks" value={points.length} />
+            <StatBadge label="Playlists" value={playlists.length} />
+            <StatBadge label="Artists" value={libraryData.artists.length} />
+          </div>
+          <div className="w-0 min-w-full">
+            <FeatureExtractor libraryData={libraryData} />
+          </div>
         </div>
         {hovered && (
           <SongTooltip info={hovered} playlistNames={playlistNames} />

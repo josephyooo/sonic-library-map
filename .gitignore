@@ -52,3 +52,4 @@ next-env.d.ts
 
 # SQLite database files
 next-app/data/
+umap-service/data/
