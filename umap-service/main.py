@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="UMAP Service", version="0.2.0")
 
+DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+
 # Unauthenticated YTMusic client — sufficient for search
 _yt: YTMusic | None = None
 
@@ -92,17 +94,17 @@ def _compute_umap(
 
     matrix = np.array([features[tid] for tid in valid_ids], dtype=np.float64)
 
-    # Check cache
-    cache_key = hashlib.sha256(matrix.tobytes()).hexdigest()[:16]
+    # Check cache (key includes UMAP parameters so different settings get separate entries)
+    key_input = matrix.tobytes() + f"|{n_neighbors}|{min_dist}".encode()
+    cache_key = hashlib.sha256(key_input).hexdigest()[:16]
     cached = _get_umap_cache(cache_key)
     if cached is not None:
-        return UMAPResponse(coordinates=cached)
-
-    # Run PCA + UMAP in a subprocess to avoid numba/TF mutex conflict
-    coords_list = _run_umap_subprocess(matrix, n_neighbors, min_dist)
-
-    coordinates = {tid: coords_list[i] for i, tid in enumerate(valid_ids)}
-    _cache_umap(cache_key, coordinates)
+        coordinates = cached
+    else:
+        # Run PCA + UMAP in a subprocess to avoid numba/TF mutex conflict
+        coords_list = _run_umap_subprocess(matrix, n_neighbors, min_dist)
+        coordinates = {tid: coords_list[i] for i, tid in enumerate(valid_ids)}
+        _cache_umap(cache_key, coordinates)
 
     # Compute axis correlations using raw features (interpretable dimensions)
     x_axis = None
@@ -398,17 +400,24 @@ async def compute_clusters(request: ClusterRequest):
 # ─── Cached features ─────────────────────────────────────────────────────────
 
 
-@app.get("/features")
-async def get_cached():
-    """Return all cached TF embeddings (for UMAP) and raw features (for overlay)."""
+class CachedFeaturesRequest(BaseModel):
+    track_ids: list[str]
+
+
+@app.post("/features/cached")
+async def get_cached(body: CachedFeaturesRequest):
+    """Return cached TF embeddings and raw features for the given track IDs only."""
     all_embeddings, all_raw = await asyncio.gather(
         asyncio.to_thread(get_all_cached_embeddings),
         asyncio.to_thread(get_all_cached_features),
     )
+    requested = set(body.track_ids)
+    embeddings = {k: v for k, v in all_embeddings.items() if k in requested}
+    raw = {k: v for k, v in all_raw.items() if k in requested}
     return {
-        "features": all_embeddings,
-        "raw_features": all_raw,
-        "count": len(all_embeddings),
+        "features": embeddings,
+        "raw_features": raw,
+        "count": len(embeddings),
     }
 
 
@@ -531,37 +540,38 @@ async def run_feature_extraction(body: FeaturesRequest, request: Request):
 # ─── Query cached matches ───────────────────────────────────────────────────
 
 
-@app.get("/downloads")
-async def list_downloads():
-    """Return all cached audio downloads with file status (debug endpoint)."""
-    from audio_source import get_all_downloads
-    downloads = await asyncio.to_thread(get_all_downloads)
-    total_size = sum(d["file_size"] for d in downloads if d["exists"])
-    return {
-        "downloads": downloads,
-        "count": len(downloads),
-        "on_disk": sum(1 for d in downloads if d["exists"]),
-        "total_size_mb": round(total_size / (1024 * 1024), 1),
-    }
+if DEBUG_MODE:
 
-
-@app.get("/matches")
-async def list_matches():
-    """Return all cached YouTube Music matches with feature status."""
-    from audio_source import get_all_cached_matches
-    matches, all_features = await asyncio.gather(
-        asyncio.to_thread(get_all_cached_matches),
-        asyncio.to_thread(get_all_cached_features),
-    )
-    return [
-        {
-            "spotify_id": m.spotify_id,
-            "video_id": m.video_id,
-            "title": m.title,
-            "artist": m.artist,
-            "duration_s": m.duration_s,
-            "youtube_url": f"https://music.youtube.com/watch?v={m.video_id}",
-            "has_features": m.spotify_id in all_features,
+    @app.get("/downloads")
+    async def list_downloads():
+        """Return all cached audio downloads with file status (debug only)."""
+        from audio_source import get_all_downloads
+        downloads = await asyncio.to_thread(get_all_downloads)
+        total_size = sum(d["file_size"] for d in downloads if d["exists"])
+        return {
+            "downloads": downloads,
+            "count": len(downloads),
+            "on_disk": sum(1 for d in downloads if d["exists"]),
+            "total_size_mb": round(total_size / (1024 * 1024), 1),
         }
-        for m in matches
-    ]
+
+    @app.get("/matches")
+    async def list_matches():
+        """Return all cached YouTube Music matches with feature status (debug only)."""
+        from audio_source import get_all_cached_matches
+        matches, all_features = await asyncio.gather(
+            asyncio.to_thread(get_all_cached_matches),
+            asyncio.to_thread(get_all_cached_features),
+        )
+        return [
+            {
+                "spotify_id": m.spotify_id,
+                "video_id": m.video_id,
+                "title": m.title,
+                "artist": m.artist,
+                "duration_s": m.duration_s,
+                "youtube_url": f"https://music.youtube.com/watch?v={m.video_id}",
+                "has_features": m.spotify_id in all_features,
+            }
+            for m in matches
+        ]
