@@ -65,25 +65,35 @@ export default function DashboardClient() {
     return map;
   }, [libraryData]);
 
+  // Active coordinate set based on view mode
+  const activeCoords = viewMode === "umap" ? umapCoords
+    : viewMode === "genre" ? genreCoords
+    : null;
+
+  // Filter playlists to only those with at least one visible track in the current view
+  const visiblePlaylists = useMemo(() => {
+    if (!activeCoords || !libraryData) return playlists;
+    return playlists.filter((p) => {
+      const trackIds = libraryData.playlistTracks[p.id];
+      if (!trackIds) return false;
+      return trackIds.some((tid) => tid in activeCoords);
+    });
+  }, [playlists, activeCoords, libraryData]);
+
   const playlistColors = useMemo((): PlaylistColor[] => {
-    return playlists.map((p, i) => ({
+    return visiblePlaylists.map((p, i) => ({
       id: p.id,
       name: p.name,
       color: PALETTE[i % PALETTE.length],
       visible: playlistVisibility[p.id] ?? true,
     }));
-  }, [playlists, playlistVisibility]);
+  }, [visiblePlaylists, playlistVisibility]);
 
   const playlistNames = useMemo(() => {
     const m = new Map<string, string>();
-    for (const p of playlists) m.set(p.id, p.name);
+    for (const p of visiblePlaylists) m.set(p.id, p.name);
     return m;
-  }, [playlists]);
-
-  // Active coordinate set based on view mode
-  const activeCoords = viewMode === "umap" ? umapCoords
-    : viewMode === "genre" ? genreCoords
-    : null;
+  }, [visiblePlaylists]);
 
   const points = useMemo((): PlotPoint[] => {
     if (!libraryData) return [];
@@ -117,9 +127,9 @@ export default function DashboardClient() {
 
   const handleHideAll = useCallback(() => {
     const vis: Record<string, boolean> = {};
-    for (const p of playlists) vis[p.id] = false;
+    for (const p of visiblePlaylists) vis[p.id] = false;
     setPlaylistVisibility(vis);
-  }, [playlists]);
+  }, [visiblePlaylists]);
 
   const handleClick = useCallback((point: PlotPoint) => {
     window.open(point.track.external_urls.spotify, "_blank");
