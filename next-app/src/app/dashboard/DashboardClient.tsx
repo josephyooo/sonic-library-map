@@ -12,6 +12,8 @@ import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
+import FeatureOverlay from "@/components/FeatureOverlay";
+import * as d3 from "d3";
 
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
@@ -35,11 +37,17 @@ export default function DashboardClient() {
   >({});
   const [viewMode, setViewMode] = useState<ViewMode>("default");
   const [umapCoords, setUmapCoords] = useState<Record<string, [number, number]> | null>(null);
+  const [umapAxisLabels, setUmapAxisLabels] = useState<{
+    x: { name: string; directionLow: string; directionHigh: string } | null;
+    y: { name: string; directionLow: string; directionHigh: string } | null;
+  }>({ x: null, y: null });
   const [umapLoading, setUmapLoading] = useState(false);
   const umapAbortRef = useRef<AbortController | null>(null);
   const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
+  const [trackFeatures, setTrackFeatures] = useState<Record<string, number[]> | null>(null);
+  const [colorFeatureIdx, setColorFeatureIdx] = useState<number | null>(null);
   const cachedFeaturesLoaded = useRef(false);
   const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
   const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
@@ -56,6 +64,7 @@ export default function DashboardClient() {
         const data = await response.json();
         const count = data.count ?? 0;
         setCachedFeatureCount(count);
+        if (data.features) setTrackFeatures(data.features);
 
         if (count >= 5) {
           // Compute UMAP from cached features
@@ -69,6 +78,12 @@ export default function DashboardClient() {
           if (umapResponse.ok) {
             const umapData = await umapResponse.json();
             setUmapCoords(umapData.coordinates);
+            if (umapData.x_axis || umapData.y_axis) {
+              setUmapAxisLabels({
+                x: umapData.x_axis ? { name: umapData.x_axis.name, directionLow: umapData.x_axis.direction_low, directionHigh: umapData.x_axis.direction_high } : null,
+                y: umapData.y_axis ? { name: umapData.y_axis.name, directionLow: umapData.y_axis.direction_low, directionHigh: umapData.y_axis.direction_high } : null,
+              });
+            }
           }
           setUmapLoading(false);
         }
@@ -197,10 +212,37 @@ export default function DashboardClient() {
   }, [libraryData, trackPlaylistMap, activeCoords, showEmptyPlot]);
 
   const axisLabels = useMemo(() => {
-    if (viewMode === "umap") return { x: "UMAP 1", y: "UMAP 2" };
+    if (viewMode === "umap") {
+      const xLabel = umapAxisLabels.x
+        ? `${umapAxisLabels.x.directionLow} ← → ${umapAxisLabels.x.directionHigh}`
+        : "UMAP 1";
+      const yLabel = umapAxisLabels.y
+        ? `${umapAxisLabels.y.directionLow} ← → ${umapAxisLabels.y.directionHigh}`
+        : "UMAP 2";
+      return { x: xLabel, y: yLabel };
+    }
     if (viewMode === "genre") return { x: "Dense ← → Spiky", y: "Organic ← → Electronic" };
     return { x: "Release Year", y: "Popularity" };
-  }, [viewMode]);
+  }, [viewMode, umapAxisLabels]);
+
+  // Feature color overlay: map track ID -> color based on selected feature
+  const featureColorMap = useMemo(() => {
+    if (colorFeatureIdx === null || !trackFeatures) return null;
+    const values: { id: string; val: number }[] = [];
+    for (const [id, feats] of Object.entries(trackFeatures)) {
+      if (feats[colorFeatureIdx] !== undefined) {
+        values.push({ id, val: feats[colorFeatureIdx] });
+      }
+    }
+    if (values.length === 0) return null;
+    const extent = d3.extent(values, (v) => v.val) as [number, number];
+    const scale = d3.scaleSequential(d3.interpolateTurbo).domain(extent);
+    const map = new Map<string, string>();
+    for (const { id, val } of values) {
+      map.set(id, scale(val));
+    }
+    return map;
+  }, [colorFeatureIdx, trackFeatures]);
 
   const handleToggle = useCallback((id: string) => {
     setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -225,6 +267,7 @@ export default function DashboardClient() {
       if (!libraryData) return;
 
       setCachedFeatureCount(Object.keys(features).length);
+      setTrackFeatures({ ...features });
 
       umapAbortRef.current?.abort();
       const controller = new AbortController();
@@ -243,6 +286,12 @@ export default function DashboardClient() {
         const data = await response.json();
         if (!controller.signal.aborted) {
           setUmapCoords(data.coordinates);
+          if (data.x_axis || data.y_axis) {
+            setUmapAxisLabels({
+              x: data.x_axis ? { name: data.x_axis.name, directionLow: data.x_axis.direction_low, directionHigh: data.x_axis.direction_high } : null,
+              y: data.y_axis ? { name: data.y_axis.name, directionLow: data.y_axis.direction_low, directionHigh: data.y_axis.direction_high } : null,
+            });
+          }
         }
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -292,6 +341,7 @@ export default function DashboardClient() {
           points={points}
           playlistColors={playlistColors}
           highlightedTracks={highlightedTracks}
+          featureColorMap={featureColorMap}
           onHover={setHovered}
           onClick={handleClick}
           xLabel={axisLabels.x}
@@ -309,6 +359,12 @@ export default function DashboardClient() {
             genreLoading={genreLoading}
             onChange={handleViewChange}
           />
+          {viewMode === "umap" && trackFeatures && (
+            <FeatureOverlay
+              selected={colorFeatureIdx}
+              onChange={setColorFeatureIdx}
+            />
+          )}
           <div className="w-0 min-w-full">
             <FeatureExtractor
               libraryData={libraryData}

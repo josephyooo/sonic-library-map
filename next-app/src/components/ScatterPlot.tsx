@@ -25,6 +25,7 @@ interface ScatterPlotProps {
   points: PlotPoint[];
   playlistColors: PlaylistColor[];
   highlightedTracks?: Set<string> | null;
+  featureColorMap?: Map<string, string> | null;
   onHover: (info: HoveredPoint | null) => void;
   onClick: (point: PlotPoint) => void;
   xLabel: string;
@@ -43,6 +44,7 @@ export default function ScatterPlot({
   yLabel,
   xFormat,
   highlightedTracks,
+  featureColorMap,
 }: ScatterPlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -186,7 +188,7 @@ export default function ScatterPlot({
     // Draw points
     const hovered = hoveredRef.current;
     for (const point of points) {
-      const color = getPointColor(point);
+      const color = featureColorMap?.get(point.id) ?? getPointColor(point);
 
       const px = transform.applyX(xs(point.x));
       const py = transform.applyY(ys(point.y));
@@ -214,7 +216,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, xLabel, yLabel, xFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, xLabel, yLabel, xFormat]);
 
   useEffect(() => {
     const container = containerRef.current;
