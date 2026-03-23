@@ -5,9 +5,10 @@ import type { HoveredPoint } from "./ScatterPlot";
 interface SongTooltipProps {
   info: HoveredPoint;
   playlistNames: Map<string, string>;
+  featureLabel?: string | null;
 }
 
-export default function SongTooltip({ info, playlistNames }: SongTooltipProps) {
+export default function SongTooltip({ info, playlistNames, featureLabel }: SongTooltipProps) {
   const { point, screenX, screenY } = info;
   const { track } = point;
   const albumArt = track.album.images.find((img) => img.width <= 64)?.url
@@ -47,8 +48,11 @@ export default function SongTooltip({ info, playlistNames }: SongTooltipProps) {
           {track.artists.map((a) => a.name).join(", ")}
         </p>
         <p className="truncate text-xs text-zinc-500">{track.album.name}</p>
+        {featureLabel && (
+          <p className="mt-1 text-xs font-medium text-green-400">{featureLabel}</p>
+        )}
         {playlists.length > 0 && (
-          <p className="mt-1 truncate text-xs text-zinc-500">
+          <p className={`${featureLabel ? "" : "mt-1 "}truncate text-xs text-zinc-500`}>
             {playlists.length === 1
               ? playlists[0]
               : `${playlists[0]} +${playlists.length - 1} more`}

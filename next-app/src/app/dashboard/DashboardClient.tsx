@@ -12,7 +12,7 @@ import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
-import FeatureOverlay from "@/components/FeatureOverlay";
+import FeatureOverlay, { OVERLAY_FEATURES } from "@/components/FeatureOverlay";
 import { handleApiError, parseAxisLabel } from "@/lib/api";
 import * as d3 from "d3";
 
@@ -408,7 +408,17 @@ export default function DashboardClient() {
           )}
         </div>
         {hovered && (
-          <SongTooltip info={hovered} playlistNames={playlistNames} />
+          <SongTooltip
+            info={hovered}
+            playlistNames={playlistNames}
+            featureLabel={(() => {
+              if (colorFeatureIdx === null || !rawFeatures) return null;
+              const feat = OVERLAY_FEATURES.find((f) => f.idx === colorFeatureIdx);
+              const raw = rawFeatures[hovered.point.id]?.[colorFeatureIdx];
+              if (!feat || raw === undefined) return null;
+              return `${feat.name}: ${feat.format(raw)}`;
+            })()}
+          />
         )}
       </div>
 

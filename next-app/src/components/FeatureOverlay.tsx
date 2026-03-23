@@ -1,15 +1,25 @@
 "use client";
 
-const OVERLAY_FEATURES = [
-  { idx: 26, name: "Brightness" },
-  { idx: 27, name: "BPM" },
-  { idx: 28, name: "Beat Strength" },
-  { idx: 32, name: "Loudness" },
-  { idx: 34, name: "Dynamic Range" },
-  { idx: 35, name: "Danceability" },
-  { idx: 36, name: "Energy" },
-  { idx: 38, name: "Noisiness" },
-  { idx: 39, name: "High-Freq Energy" },
+function fmtHz(v: number): string {
+  return v >= 1000 ? `${(v / 1000).toFixed(1)} kHz` : `${Math.round(v)} Hz`;
+}
+
+export interface OverlayFeature {
+  idx: number;
+  name: string;
+  format: (raw: number) => string;
+}
+
+export const OVERLAY_FEATURES: OverlayFeature[] = [
+  { idx: 26, name: "Brightness", format: (v) => fmtHz(v) },
+  { idx: 27, name: "BPM", format: (v) => `${Math.round(v * 250)} BPM` },
+  { idx: 28, name: "Beat Strength", format: (v) => `${(v / 5 * 100).toFixed(0)}%` },
+  { idx: 32, name: "Loudness", format: (v) => `${v.toFixed(1)} LUFS` },
+  { idx: 34, name: "Dynamic Range", format: (v) => `${v.toFixed(1)}` },
+  { idx: 35, name: "Danceability", format: (v) => `${(v / 3 * 100).toFixed(0)}%` },
+  { idx: 36, name: "Energy", format: (v) => `${(v / 14 * 100).toFixed(0)}%` },
+  { idx: 38, name: "Noisiness", format: (v) => `${(v / 0.3 * 100).toFixed(0)}%` },
+  { idx: 39, name: "High-Freq Energy", format: (v) => fmtHz(v) },
 ];
 
 interface FeatureOverlayProps {
