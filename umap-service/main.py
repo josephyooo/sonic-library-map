@@ -54,8 +54,17 @@ class UMAPRequest(BaseModel):
     min_dist: float = 0.1
 
 
+class AxisLabel(BaseModel):
+    name: str
+    correlation: float  # Pearson r, can be negative
+    direction_low: str
+    direction_high: str
+
+
 class UMAPResponse(BaseModel):
     coordinates: dict[str, list[float]]
+    x_axis: AxisLabel | None = None
+    y_axis: AxisLabel | None = None
 
 
 def _compute_umap(
@@ -63,16 +72,17 @@ def _compute_umap(
     features: dict[str, list[float]],
     n_neighbors: int,
     min_dist: float,
-) -> dict[str, list[float]]:
+) -> UMAPResponse:
     import hashlib
     import numpy as np
     from sklearn.preprocessing import StandardScaler
     from umap import UMAP
+    from feature_extract import AXIS_FEATURE_NAMES
 
     # Filter to tracks that have features
     valid_ids = [tid for tid in track_ids if tid in features]
     if len(valid_ids) < 2:
-        return {}
+        return UMAPResponse(coordinates={})
 
     matrix = np.array([features[tid] for tid in valid_ids], dtype=np.float64)
 
@@ -80,14 +90,14 @@ def _compute_umap(
     cache_key = hashlib.sha256(matrix.tobytes()).hexdigest()[:16]
     cached = _get_umap_cache(cache_key)
     if cached is not None:
-        return cached
+        return UMAPResponse(coordinates=cached)
 
     # Z-score normalize
     scaler = StandardScaler()
-    matrix = scaler.fit_transform(matrix)
+    normalized = scaler.fit_transform(matrix)
 
     # Replace any NaN/inf from constant features with 0
-    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
+    normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Clamp n_neighbors to valid range
     effective_neighbors = min(n_neighbors, len(valid_ids) - 1)
@@ -101,11 +111,72 @@ def _compute_umap(
         random_state=42,
         n_jobs=1,
     )
-    coords = reducer.fit_transform(matrix)
+    coords = reducer.fit_transform(normalized)
 
-    result = {tid: coords[i].tolist() for i, tid in enumerate(valid_ids)}
-    _cache_umap(cache_key, result)
-    return result
+    coordinates = {tid: coords[i].tolist() for i, tid in enumerate(valid_ids)}
+    _cache_umap(cache_key, coordinates)
+
+    # Compute axis correlations against original (unnormalized) features
+    x_axis = _best_axis_correlation(matrix, coords[:, 0], AXIS_FEATURE_NAMES)
+    y_axis = _best_axis_correlation(matrix, coords[:, 1], AXIS_FEATURE_NAMES)
+
+    return UMAPResponse(coordinates=coordinates, x_axis=x_axis, y_axis=y_axis)
+
+
+# Direction hints for named features (low → high)
+_FEATURE_DIRECTIONS: dict[str, tuple[str, str]] = {
+    "Brightness": ("Dark", "Bright"),
+    "BPM": ("Slow", "Fast"),
+    "Beat Strength": ("Weak Beat", "Strong Beat"),
+    "Key": ("Low Key", "High Key"),
+    "Major/Minor": ("Minor", "Major"),
+    "Key Confidence": ("Ambiguous Key", "Clear Key"),
+    "Loudness": ("Quiet", "Loud"),
+    "Loudness Range": ("Compressed", "Dynamic"),
+    "Dynamic Range": ("Flat", "Dynamic"),
+    "Danceability": ("Still", "Danceable"),
+    "Energy": ("Calm", "Energetic"),
+    "RMS": ("Soft", "Loud"),
+    "Noisiness": ("Clean", "Noisy"),
+    "High-Freq Energy": ("Mellow", "Crisp"),
+    "Tonal vs Noise": ("Tonal", "Noisy"),
+}
+
+
+def _best_axis_correlation(
+    feature_matrix: "np.ndarray",
+    axis_coords: "np.ndarray",
+    names: list[str],
+) -> AxisLabel | None:
+    import numpy as np
+
+    best_name = ""
+    best_r = 0.0
+
+    for i, name in enumerate(names):
+        if not name:  # skip MFCCs
+            continue
+        col = feature_matrix[:, i]
+        if np.std(col) < 1e-10:
+            continue
+        r = float(np.corrcoef(col, axis_coords)[0, 1])
+        if abs(r) > abs(best_r):
+            best_r = r
+            best_name = name
+
+    if not best_name:
+        return None
+
+    low, high = _FEATURE_DIRECTIONS.get(best_name, ("Low", "High"))
+    if best_r < 0:
+        low, high = high, low
+
+    return AxisLabel(
+        name=best_name,
+        correlation=round(best_r, 3),
+        direction_low=low,
+        direction_high=high,
+    )
 
 
 def _get_umap_cache(cache_key: str) -> dict[str, list[float]] | None:
@@ -146,14 +217,13 @@ def _cache_umap(cache_key: str, coordinates: dict[str, list[float]]) -> None:
 @app.post("/umap", response_model=UMAPResponse)
 async def compute_umap(request: UMAPRequest):
     """Run UMAP on feature vectors. Z-score normalizes, caches by feature hash."""
-    coords = await asyncio.to_thread(
+    return await asyncio.to_thread(
         _compute_umap,
         request.track_ids,
         request.features,
         request.n_neighbors,
         request.min_dist,
     )
-    return UMAPResponse(coordinates=coords)
 
 
 # ─── Cluster detection (Phase 7) ─────────────────────────────────────────────

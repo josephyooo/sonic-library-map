@@ -28,6 +28,48 @@ logger = logging.getLogger(__name__)
 FEATURE_DIM = 41
 SAMPLE_RATE = 22050
 
+# Human-readable names for each dimension in the feature vector.
+# MFCCs are grouped since individual coefficients aren't meaningful to users.
+FEATURE_NAMES: list[str] = [
+    *[f"MFCC {i+1} (mean)" for i in range(13)],
+    *[f"MFCC {i+1} (std)" for i in range(13)],
+    "Brightness",       # spectral centroid
+    "BPM",
+    "Beat Strength",
+    "Key",
+    "Major/Minor",
+    "Key Confidence",
+    "Loudness",         # integrated loudness
+    "Loudness Range",
+    "Dynamic Range",    # dynamic complexity
+    "Danceability",
+    "Energy",
+    "RMS",
+    "Noisiness",        # zero crossing rate
+    "High-Freq Energy", # spectral rolloff
+    "Tonal vs Noise",   # spectral flatness
+]
+
+# Shorter labels for axis display — skip MFCCs since they rarely dominate
+AXIS_FEATURE_NAMES: list[str] = [
+    *["" for _ in range(26)],  # MFCCs (not useful as axis labels)
+    "Brightness",
+    "BPM",
+    "Beat Strength",
+    "Key",
+    "Major/Minor",
+    "Key Confidence",
+    "Loudness",
+    "Loudness Range",
+    "Dynamic Range",
+    "Danceability",
+    "Energy",
+    "RMS",
+    "Noisiness",
+    "High-Freq Energy",
+    "Tonal vs Noise",
+]
+
 KEY_MAP = {
     "C": 0, "C#": 1, "D": 2, "D#": 3, "E": 4, "F": 5,
     "F#": 6, "G": 7, "G#": 8, "A": 9, "A#": 10, "B": 11,
