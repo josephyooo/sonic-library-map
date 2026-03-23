@@ -15,7 +15,7 @@ export async function GET() {
   let response: Response;
   try {
     response = await fetch(`${UMAP_SERVICE_URL}/features`, {
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(120_000), // 2min — large JSON with 1280-dim embeddings
     });
   } catch {
     return NextResponse.json(
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
+      // No timeout — extraction can run for 30+ minutes
     });
   } catch {
     return NextResponse.json(

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(300_000), // 5min — UMAP on 1280-dim embeddings can be slow
     });
   } catch {
     return NextResponse.json(

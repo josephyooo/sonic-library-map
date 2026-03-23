@@ -24,6 +24,7 @@ interface FeatureExtractorProps {
   cachedCount: number;
   showButton: boolean;
   onFeaturesReady: (features: Record<string, number[]>) => void;
+  onRawFeaturesReady?: (features: Record<string, number[]>) => void;
 }
 
 export default function FeatureExtractor({
@@ -31,6 +32,7 @@ export default function FeatureExtractor({
   cachedCount,
   showButton,
   onFeaturesReady,
+  onRawFeaturesReady,
 }: FeatureExtractorProps) {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [running, setRunning] = useState(false);
@@ -72,6 +74,9 @@ export default function FeatureExtractor({
           if (Object.keys(accumulated).length >= 5) {
             onFeaturesReady({ ...accumulated });
           }
+        }
+        if (cachedData.raw_features && onRawFeaturesReady) {
+          onRawFeaturesReady(cachedData.raw_features);
         }
       }
 
@@ -160,6 +165,16 @@ export default function FeatureExtractor({
             if (Object.keys(accumulated).length > 0) {
               onFeaturesReady({ ...accumulated });
             }
+            // Re-fetch raw features (extracted server-side, not in SSE stream)
+            if (onRawFeaturesReady) {
+              try {
+                const rawResp = await fetch("/api/features", { signal: controller.signal });
+                if (rawResp.ok) {
+                  const rawData = await rawResp.json();
+                  if (rawData.raw_features) onRawFeaturesReady(rawData.raw_features);
+                }
+              } catch { /* ignore */ }
+            }
           }
         }
       }
@@ -169,7 +184,7 @@ export default function FeatureExtractor({
     } finally {
       setRunning(false);
     }
-  }, [libraryData, onFeaturesReady]);
+  }, [libraryData, onFeaturesReady, onRawFeaturesReady]);
 
   const percentage = progress
     ? Math.round((progress.current / progress.total) * 100)

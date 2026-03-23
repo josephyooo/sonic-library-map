@@ -53,6 +53,7 @@ export default function DashboardClient() {
   const [genreLoading, setGenreLoading] = useState(false);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
   const [trackFeatures, setTrackFeatures] = useState<Record<string, number[]> | null>(null);
+  const [rawFeatures, setRawFeatures] = useState<Record<string, number[]> | null>(null);
   const [colorFeatureIdx, setColorFeatureIdx] = useState<number | null>(null);
   const cachedFeaturesLoaded = useRef(false);
   const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
@@ -72,15 +73,20 @@ export default function DashboardClient() {
         const count = data.count ?? 0;
         setCachedFeatureCount(count);
         if (data.features) setTrackFeatures(data.features);
+        if (data.raw_features) setRawFeatures(data.raw_features);
 
         if (count >= 5) {
-          // Compute UMAP from cached features
+          // Compute UMAP from cached TF embeddings, with raw features for axis labels
           const trackIds = libraryData.tracks.map((t) => t.id);
           setUmapLoading(true);
           const umapResponse = await fetch("/api/umap", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ track_ids: trackIds, features: data.features }),
+            body: JSON.stringify({
+              track_ids: trackIds,
+              features: data.features,
+              raw_features: data.raw_features ?? null,
+            }),
           });
           handleApiError(umapResponse);
           if (umapResponse.ok) {
@@ -236,10 +242,10 @@ export default function DashboardClient() {
 
   // Feature color overlay: map track ID -> color + normalized value (0-1)
   const { featureColorMap, featureValueMap } = useMemo(() => {
-    if (colorFeatureIdx === null || !trackFeatures)
+    if (colorFeatureIdx === null || !rawFeatures)
       return { featureColorMap: null, featureValueMap: null };
     const values: { id: string; val: number }[] = [];
-    for (const [id, feats] of Object.entries(trackFeatures)) {
+    for (const [id, feats] of Object.entries(rawFeatures)) {
       if (feats[colorFeatureIdx] !== undefined) {
         values.push({ id, val: feats[colorFeatureIdx] });
       }
@@ -256,7 +262,7 @@ export default function DashboardClient() {
       vMap.set(id, normScale(val));
     }
     return { featureColorMap: cMap, featureValueMap: vMap };
-  }, [colorFeatureIdx, trackFeatures]);
+  }, [colorFeatureIdx, rawFeatures]);
 
   const handleToggle = useCallback((id: string) => {
     setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
@@ -290,6 +296,8 @@ export default function DashboardClient() {
       setUmapLoading(true);
       try {
         const trackIds = libraryData.tracks.map((t) => t.id);
+        // Skip raw_features during progressive updates to keep payload small
+        // (1280-dim embeddings alone can be ~10MB for a large library)
         const response = await fetch("/api/umap", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -317,7 +325,7 @@ export default function DashboardClient() {
         }
       }
     },
-    [libraryData],
+    [libraryData, rawFeatures],
   );
 
   const handleViewChange = useCallback(
@@ -385,7 +393,7 @@ export default function DashboardClient() {
             genreLoading={genreLoading}
             onChange={handleViewChange}
           />
-          {viewMode === "umap" && trackFeatures && (
+          {viewMode === "umap" && rawFeatures && (
             <FeatureOverlay
               selected={colorFeatureIdx}
               onChange={setColorFeatureIdx}
@@ -397,6 +405,7 @@ export default function DashboardClient() {
               cachedCount={cachedFeatureCount}
               showButton={viewMode === "umap"}
               onFeaturesReady={handleFeaturesReady}
+              onRawFeaturesReady={setRawFeatures}
             />
           </div>
           {umapLoading && (
