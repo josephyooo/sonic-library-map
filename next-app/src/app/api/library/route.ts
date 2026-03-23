@@ -25,11 +25,16 @@ async function getValidAccessToken(): Promise<{
   // Refresh token if expired (with 60s buffer)
   if (session.tokenExpiry && Date.now() > session.tokenExpiry - 60_000) {
     if (!session.refreshToken) return null;
-    const tokens = await refreshAccessToken(session.refreshToken);
-    session.accessToken = tokens.access_token;
-    if (tokens.refresh_token) session.refreshToken = tokens.refresh_token;
-    session.tokenExpiry = Date.now() + tokens.expires_in * 1000;
-    await session.save();
+    try {
+      const tokens = await refreshAccessToken(session.refreshToken);
+      session.accessToken = tokens.access_token;
+      if (tokens.refresh_token) session.refreshToken = tokens.refresh_token;
+      session.tokenExpiry = Date.now() + tokens.expires_in * 1000;
+      await session.save();
+    } catch {
+      session.destroy();
+      return null;
+    }
   }
 
   return { accessToken: session.accessToken, userId: session.userId };
