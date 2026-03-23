@@ -3,6 +3,12 @@
 import { useState, useCallback, useRef } from "react";
 import type { LibraryData } from "@/lib/types";
 
+function handleApiError(response: Response): void {
+  if (response.status === 401) {
+    window.location.href = "/";
+  }
+}
+
 const UMAP_UPDATE_INTERVAL = 10;
 
 interface Progress {
@@ -58,6 +64,7 @@ export default function FeatureExtractor({
       const cachedResponse = await fetch("/api/features", {
         signal: controller.signal,
       });
+      handleApiError(cachedResponse);
       if (cachedResponse.ok) {
         const cachedData = await cachedResponse.json();
         if (cachedData.features) {
@@ -90,6 +97,7 @@ export default function FeatureExtractor({
         body: JSON.stringify({ tracks: uncachedTracks }),
         signal: controller.signal,
       });
+      handleApiError(response);
 
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);

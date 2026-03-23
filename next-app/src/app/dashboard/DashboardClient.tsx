@@ -15,6 +15,12 @@ import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay from "@/components/FeatureOverlay";
 import * as d3 from "d3";
 
+function handleApiError(response: Response): void {
+  if (response.status === 401) {
+    window.location.href = "/";
+  }
+}
+
 const PALETTE = [
   "#22c55e", "#3b82f6", "#ef4444", "#f59e0b", "#a855f7",
   "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
@@ -60,6 +66,7 @@ export default function DashboardClient() {
     (async () => {
       try {
         const response = await fetch("/api/features");
+        handleApiError(response);
         if (!response.ok) return;
         const data = await response.json();
         const count = data.count ?? 0;
@@ -75,6 +82,7 @@ export default function DashboardClient() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ track_ids: trackIds, features: data.features }),
           });
+          handleApiError(umapResponse);
           if (umapResponse.ok) {
             const umapData = await umapResponse.json();
             setUmapCoords(umapData.coordinates);
@@ -111,6 +119,7 @@ export default function DashboardClient() {
           }),
           signal: controller.signal,
         });
+        handleApiError(response);
         if (response.ok) {
           const data = await response.json();
           setClusterInsights(data.insights ?? []);
@@ -287,6 +296,7 @@ export default function DashboardClient() {
           body: JSON.stringify({ track_ids: trackIds, features }),
           signal: controller.signal,
         });
+        handleApiError(response);
         if (!response.ok) throw new Error(`UMAP failed: ${response.status}`);
         const data = await response.json();
         if (!controller.signal.aborted) {
@@ -318,6 +328,7 @@ export default function DashboardClient() {
         setGenreLoading(true);
         try {
           const response = await fetch("/api/genres");
+          handleApiError(response);
           if (!response.ok) throw new Error(`Genres failed: ${response.status}`);
           const data = await response.json();
           setGenreCoords(data.coordinates);
@@ -354,6 +365,15 @@ export default function DashboardClient() {
           yLabel={axisLabels.y}
           xFormat={viewMode === "default" ? formatYear : undefined}
         />
+        {points.length === 0 && !umapLoading && !genreLoading && viewMode !== "default" && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <p className="text-sm text-zinc-400">
+              {viewMode === "umap"
+                ? "No audio features extracted yet. Click \u2018Resume extraction\u2019 to start."
+                : "No genre data available for your tracks."}
+            </p>
+          </div>
+        )}
         <div className="absolute left-4 top-4 flex flex-col gap-3">
           <div className="flex gap-3">
             <StatBadge label="Tracks" value={points.length} />

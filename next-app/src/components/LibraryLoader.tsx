@@ -32,6 +32,11 @@ export default function LibraryLoader({ onLoaded }: LibraryLoaderProps) {
         signal: controller.signal,
       });
 
+      if (response.status === 401) {
+        window.location.href = "/";
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
       }
@@ -77,7 +82,16 @@ export default function LibraryLoader({ onLoaded }: LibraryLoaderProps) {
       }
     } catch (err) {
       if (controller.signal.aborted) return;
-      const message = err instanceof Error ? err.message : "Unknown error";
+      const raw = err instanceof Error ? err.message : "Unknown error";
+      let message: string;
+      if (raw.includes("401") || raw.includes("Not authenticated")) {
+        message = "Session expired. Redirecting to login...";
+        window.location.href = "/";
+      } else if (raw.includes("Failed to fetch") || raw.includes("NetworkError")) {
+        message = "Network error — check your connection and try again.";
+      } else {
+        message = raw;
+      }
       setError(message);
       setStarted(false);
     }
