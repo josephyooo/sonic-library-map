@@ -295,6 +295,31 @@ def get_all_downloads() -> list[dict]:
 
 # ─── yt-dlp Download ─────────────────────────────────────────────────────────
 
+# Route yt-dlp output through Python logging so concurrent workers don't
+# clobber each other's carriage-return progress updates.
+_ydl_logger = logging.getLogger("yt_dlp")
+
+
+class _YdlLogBridge:
+    def debug(self, msg: str) -> None:
+        if msg.startswith("[debug] "):
+            _ydl_logger.debug(msg)
+        else:
+            _ydl_logger.info(msg)
+
+    def info(self, msg: str) -> None:
+        _ydl_logger.info(msg)
+
+    def warning(self, msg: str) -> None:
+        _ydl_logger.warning(msg)
+
+    def error(self, msg: str) -> None:
+        _ydl_logger.error(msg)
+
+
+_YDL_BRIDGE = _YdlLogBridge()
+
+
 def download_audio(video_id: str, output_dir: str) -> str | None:
     """Download audio for a YouTube video ID. Returns path to downloaded file."""
     opts = {
@@ -302,6 +327,8 @@ def download_audio(video_id: str, output_dir: str) -> str | None:
         "outtmpl": os.path.join(output_dir, f"{video_id}.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
+        "noprogress": True,
+        "logger": _YDL_BRIDGE,
         "cookiesfrombrowser": ("chrome",),
     }
 
