@@ -68,34 +68,43 @@ export async function GET() {
 
       try {
         // 1. Fetch saved tracks
-        const tracks = await getSavedTracks(auth.accessToken, sendProgress);
+        const savedTracks = await getSavedTracks(auth.accessToken, sendProgress);
 
-        // 2. Fetch playlists
-        const playlists = await getUserPlaylists(auth.accessToken, sendProgress);
+        // 2. Fetch playlists, then keep only ones the user created
+        const allPlaylists = await getUserPlaylists(
+          auth.accessToken,
+          sendProgress,
+        );
+        const playlists = allPlaylists.filter(
+          (p) => p.owner.id === auth.userId,
+        );
 
-        // 3. Fetch tracks for each playlist
+        // 3. Fetch tracks for each owned playlist; merge into the library
         const playlistTracks: Record<string, string[]> = {};
+        const tracksById = new Map(
+          savedTracks.filter((t) => t.id).map((t) => [t.id, t]),
+        );
         for (let i = 0; i < playlists.length; i++) {
           sendProgress("Fetching playlist tracks", i + 1, playlists.length);
           const pTracks = await getPlaylistTracks(
             playlists[i].id,
             auth.accessToken,
           );
-          playlistTracks[playlists[i].id] = pTracks.map((t) => t.id);
+          // Local files have empty/null ids on both track and artists — skip
+          const realTracks = pTracks.filter((t) => t.id);
+          playlistTracks[playlists[i].id] = realTracks.map((t) => t.id);
+          for (const t of realTracks) {
+            if (!tracksById.has(t.id)) tracksById.set(t.id, t);
+          }
         }
+        const tracks = [...tracksById.values()];
 
-        // 4. Collect unique track IDs and try to fetch audio features
+        // 4. Try to fetch audio features for every track in the library
         // Note: Spotify deprecated this endpoint for new apps (Nov 2024)
-        const allTrackIds = new Set<string>();
-        tracks.forEach((t) => allTrackIds.add(t.id));
-        Object.values(playlistTracks)
-          .flat()
-          .forEach((id) => allTrackIds.add(id));
-
         let audioFeatures: Awaited<ReturnType<typeof getAudioFeatures>> = [];
         try {
           audioFeatures = await getAudioFeatures(
-            [...allTrackIds],
+            tracks.map((t) => t.id),
             auth.accessToken,
             sendProgress,
           );
@@ -105,7 +114,11 @@ export async function GET() {
 
         // 5. Collect unique artist IDs and fetch artist data (for genres)
         const artistIds = new Set<string>();
-        tracks.forEach((t) => t.artists.forEach((a) => artistIds.add(a.id)));
+        tracks.forEach((t) =>
+          t.artists.forEach((a) => {
+            if (a.id) artistIds.add(a.id);
+          }),
+        );
         const artists = await getArtists(
           [...artistIds],
           auth.accessToken,
