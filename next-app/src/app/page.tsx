@@ -20,7 +20,7 @@ export default function Home() {
             </svg>
           </div>
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-            Spotify Library Viz
+            Sonic Library Map
           </h1>
         </div>
         <p

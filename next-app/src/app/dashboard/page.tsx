@@ -19,7 +19,7 @@ export default async function Dashboard() {
         className="flex items-center justify-between px-6 py-3"
         style={{ borderBottom: "1px solid var(--ctp-surface0)" }}
       >
-        <h1 className="text-lg font-bold">Spotify Library Viz</h1>
+        <h1 className="text-lg font-bold">Sonic Library Map</h1>
         <div className="flex items-center gap-3">
           <ThemeToggle />
           <span className="text-sm" style={{ color: "var(--ctp-subtext0)" }}>

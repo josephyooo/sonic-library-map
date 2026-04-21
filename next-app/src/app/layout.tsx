@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Spotify Library Viz",
-  description: "Visualize your Spotify library as an interactive scatter plot",
+  title: "Sonic Library Map",
+  description: "An interactive map of your Spotify library in audio-embedding space",
 };
 
 export default function RootLayout({

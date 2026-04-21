@@ -1,8 +1,12 @@
-# Spotify Library Visualization
+# Sonic Library Map
 
 > **Note**: This project was built with [Claude Code](https://claude.ai/claude-code). Code, documentation, and commit messages were AI-generated with human direction and review.
 
-An interactive web app that plots your entire Spotify library as a scatter plot, draws boundaries around playlist groupings, and reveals latent clusters — songs that could be playlists but aren't. Inspired by [Every Noise at Once](https://everynoise.com), but personal.
+Maps your **Spotify library** as an interactive 2D scatter plot of Essentia + Discogs-EffNet audio embeddings. This project also forms and draws HDBSCAN clusters.
+
+Each track is extracted from YouTube, analyzed with Essentia's Discogs-EffNet model (1280-dim learned musical similarity), and projected to 2D via UMAP.
+
+Inspired by [Every Noise at Once](https://everynoise.com).
 
 ![UMAP view of a 1,160-track library, colored by playlist with HDBSCAN cluster hulls](docs/preview.png)
 
@@ -113,10 +117,6 @@ umap-service/
   feature_extract.py -- Raw spectral feature extraction (41-dim)
   audio_source.py -- ytmusicapi search + yt-dlp download + SQLite cache
 ```
-
-## Current state
-
-Phases 0 through 7 are complete. Feature extraction uses Discogs-EffNet TF embeddings (1280-dim learned musical similarity) for UMAP, with raw spectral features (41-dim) retained for the "Color by" overlay. HDBSCAN cluster hulls render directly on the UMAP map (one polygon per cluster, noise points stay uncontained). The pipeline, UI, and all phases are fully functional. See [PLAN.md](PLAN.md) for details.
 
 ## Static demo export
 
