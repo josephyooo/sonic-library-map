@@ -1,6 +1,10 @@
 # Spotify Library Visualization
 
+> **Note**: This project was built with [Claude Code](https://claude.ai/claude-code). Code, documentation, and commit messages were AI-generated with human direction and review.
+
 An interactive web app that plots your entire Spotify library as a scatter plot, draws boundaries around playlist groupings, and reveals latent clusters — songs that could be playlists but aren't. Inspired by [Every Noise at Once](https://everynoise.com), but personal.
+
+![UMAP view of a 1,160-track library, colored by playlist with HDBSCAN cluster hulls](docs/preview.png)
 
 ## Stack
 
