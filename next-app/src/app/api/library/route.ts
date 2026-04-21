@@ -98,20 +98,26 @@ export async function GET() {
           );
           playlists = allPlaylists.filter((p) => p.owner.id === auth.userId);
 
-          // 3. Fetch tracks for each owned playlist; merge into the library
+          // 3. Fetch tracks for each owned playlist in parallel (p-queue
+          // inside spotifyFetch caps concurrency + handles 429s), merge into
+          // the library.
           playlistTracks = {};
           const tracksById = new Map(
             savedTracks.filter((t) => t.id).map((t) => [t.id, t]),
           );
-          for (let i = 0; i < playlists.length; i++) {
-            sendProgress("Fetching playlist tracks", i + 1, playlists.length);
-            const pTracks = await getPlaylistTracks(
-              playlists[i].id,
-              auth.accessToken,
-            );
-            // Local files have empty/null ids on both track and artists — skip
-            const realTracks = pTracks.filter((t) => t.id);
-            playlistTracks[playlists[i].id] = realTracks.map((t) => t.id);
+          let done = 0;
+          sendProgress("Fetching playlist tracks", 0, playlists.length);
+          const perPlaylist = await Promise.all(
+            playlists.map(async (p) => {
+              const pTracks = await getPlaylistTracks(p.id, auth.accessToken);
+              done++;
+              sendProgress("Fetching playlist tracks", done, playlists.length);
+              // Local files have empty/null ids on both track and artists — skip
+              return { id: p.id, tracks: pTracks.filter((t) => t.id) };
+            }),
+          );
+          for (const { id, tracks: realTracks } of perPlaylist) {
+            playlistTracks[id] = realTracks.map((t) => t.id);
             for (const t of realTracks) {
               if (!tracksById.has(t.id)) tracksById.set(t.id, t);
             }
