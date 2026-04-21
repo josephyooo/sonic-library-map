@@ -11,7 +11,7 @@ import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
-import ClusterPanel, { type ClusterInsight } from "@/components/ClusterPanel";
+import type { ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay, { OVERLAY_FEATURES } from "@/components/FeatureOverlay";
 import AxisSelector, { AXIS_YEAR, AXIS_POPULARITY } from "@/components/AxisSelector";
 import { handleApiError, parseAxisLabel } from "@/lib/api";
@@ -60,6 +60,7 @@ export default function DashboardClient() {
   const [colorFeatureIdx, setColorFeatureIdx] = useState<number | null>(null);
   const cachedFeaturesLoaded = useRef(false);
   const [clusterInsights, setClusterInsights] = useState<ClusterInsight[]>([]);
+  const [clusterLabels, setClusterLabels] = useState<Record<string, number> | null>(null);
   const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
   const [customXIdx, setCustomXIdx] = useState(AXIS_YEAR);
   const [customYIdx, setCustomYIdx] = useState(AXIS_POPULARITY);
@@ -133,6 +134,7 @@ export default function DashboardClient() {
         if (response.ok) {
           const data = await response.json();
           setClusterInsights(data.insights ?? []);
+          setClusterLabels(data.labels ?? null);
         }
       } catch (err) {
         if (controller.signal.aborted) return;
@@ -239,21 +241,59 @@ export default function DashboardClient() {
     return m;
   }, [visiblePlaylists]);
 
+  // Cluster overlay: in UMAP mode, synthesize an extra "playlist" per HDBSCAN cluster
+  // label (skipping noise = -1) so ScatterPlot draws a hull for each. These are *not*
+  // shown in the legend — they only exist as visual hulls on the map.
+  const { clusterColors, trackClusterMap } = useMemo(() => {
+    if (viewMode !== "umap" || !clusterLabels) {
+      return { clusterColors: [] as PlaylistColor[], trackClusterMap: new Map<string, string[]>() };
+    }
+    const byLabel = new Map<number, string[]>();
+    for (const [tid, label] of Object.entries(clusterLabels)) {
+      if (label === -1) continue;
+      const arr = byLabel.get(label);
+      if (arr) arr.push(tid);
+      else byLabel.set(label, [tid]);
+    }
+    const colors: PlaylistColor[] = [];
+    const map = new Map<string, string[]>();
+    const sorted = [...byLabel.keys()].sort((a, b) => a - b);
+    sorted.forEach((label, i) => {
+      const members = byLabel.get(label)!;
+      const id = `_cluster_${label}`;
+      colors.push({
+        id,
+        name: `${members.length}`,
+        color: PALETTE[i % PALETTE.length],
+        visible: true,
+      });
+      for (const tid of members) map.set(tid, [id]);
+    });
+    return { clusterColors: colors, trackClusterMap: map };
+  }, [viewMode, clusterLabels]);
+
+  const scatterPlotColors = useMemo(
+    () => [...playlistColors, ...clusterColors],
+    [playlistColors, clusterColors],
+  );
+
   const points = useMemo((): PlotPoint[] => {
     if (!libraryData || showEmptyPlot) return [];
     return libraryData.tracks
       .filter((track) => !activeCoords || track.id in activeCoords)
       .map((track) => {
         const coord = activeCoords?.[track.id];
+        const realIds = trackPlaylistMap.get(track.id) ?? [];
+        const clusterIds = trackClusterMap.get(track.id) ?? [];
         return {
           id: track.id,
           x: coord ? coord[0] : parseReleaseYear(track.album.release_date),
           y: coord ? coord[1] : track.popularity,
           track,
-          playlistIds: trackPlaylistMap.get(track.id) ?? [],
+          playlistIds: clusterIds.length > 0 ? [...realIds, ...clusterIds] : realIds,
         };
       });
-  }, [libraryData, trackPlaylistMap, activeCoords, showEmptyPlot]);
+  }, [libraryData, trackPlaylistMap, trackClusterMap, activeCoords, showEmptyPlot]);
 
   const axisLabels = useMemo(() => {
     if (viewMode === "umap") {
@@ -408,7 +448,7 @@ export default function DashboardClient() {
       <div className="relative flex-1">
         <ScatterPlot
           points={points}
-          playlistColors={playlistColors}
+          playlistColors={scatterPlotColors}
           highlightedTracks={highlightedTracks}
           featureColorMap={featureColorMap}
           featureValueMap={featureValueMap}
@@ -493,16 +533,6 @@ export default function DashboardClient() {
           onShowAll={handleShowAll}
           onHideAll={handleHideAll}
         />
-        {viewMode === "umap" && clusterInsights.length > 0 && (
-          <div className="border-t border-zinc-800">
-            <ClusterPanel
-              insights={clusterInsights}
-              trackLookup={trackLookup}
-              playlistNames={playlistNames}
-              onHighlight={handleHighlight}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
