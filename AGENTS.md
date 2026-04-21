@@ -67,6 +67,7 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - Raw spectral features (MFCCs) produce nonsensical UMAP clusters. Always use TF embeddings (1280-dim) for dimensionality reduction.
 - The Discogs-EffNet model file must be downloaded separately (~18MB) and placed in `umap-service/models/`.
 - All blocking I/O in the sidecar (ytmusicapi search, yt-dlp download, Essentia extraction) must use `asyncio.to_thread()` to avoid blocking uvicorn's event loop.
+- `/features` processes tracks concurrently (default 4 workers, tune via `EXTRACT_WORKERS` env var). yt-dlp downloads + raw-feature extraction can run in parallel, but `essentia-tensorflow` is **not thread-safe** — TF embedding calls are serialized through a module-level `threading.Lock`. Don't remove the lock or parallel workers will segfault / produce garbage.
 - **UMAP and HDBSCAN must run in subprocesses** — they depend on numba, which crashes with a `mutex lock failed` error when loaded in the same process as TensorFlow (via essentia-tensorflow). The sidecar shells out to `subprocess.run()` for these computations. Do NOT attempt top-level imports of `umap` or `hdbscan` in `main.py`.
 - UMAP input is PCA-reduced from 1280-dim to min(50, n_tracks-1) dims before fitting. This removes noise and speeds up computation.
 - The `POST /api/features` SSE proxy has **no timeout** — extraction can run for 30+ minutes. The sidecar checks `request.is_disconnected()` between tracks to stop work if the client goes away.

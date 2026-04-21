@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from typing import Any
 
 import numpy as np
@@ -435,11 +436,26 @@ class FeaturesRequest(BaseModel):
     tracks: list[TrackInput]
 
 
+# Essentia TF inference is not thread-safe — serialize across workers
+_tf_lock = threading.Lock()
+
+
+def _extract_embedding_locked(path: str):
+    with _tf_lock:
+        return extract_embedding(path)
+
+
+EXTRACT_WORKERS = int(os.environ.get("EXTRACT_WORKERS", "4"))
+
+
 @app.post("/features")
 async def run_feature_extraction(body: FeaturesRequest, request: Request):
     """Search YouTube Music, download audio, extract Essentia features, cache results.
 
-    Returns SSE stream with progress events and final results.
+    Tracks are processed concurrently (bounded by EXTRACT_WORKERS, default 4).
+    yt-dlp downloads + Essentia raw-feature extraction run in parallel; the TF
+    embedding step is serialized via a lock because essentia-tensorflow is not
+    thread-safe. Returns an SSE stream with progress events and final results.
     """
 
     async def generate():
@@ -450,62 +466,82 @@ async def run_feature_extraction(body: FeaturesRequest, request: Request):
         total = len(body.tracks)
         extracted = 0
         failed = 0
+        processed = 0
 
-        for i, track in enumerate(body.tracks):
-            # Stop if client disconnected
-            if await request.is_disconnected():
-                logger.info("Client disconnected, stopping extraction at %d/%d", i, total)
-                return
-            # Skip if we already have cached TF embedding
+        async def process(track: TrackInput):
+            async with sem:
+                query = TrackQuery(
+                    spotify_id=track.spotify_id,
+                    name=track.name,
+                    artist=track.artist,
+                    duration_ms=track.duration_ms,
+                )
+                result = await asyncio.to_thread(search_and_download, yt, query)
+                if result is None:
+                    return track, None, None
+                embedding, raw_features = await asyncio.gather(
+                    asyncio.to_thread(_extract_embedding_locked, result.file_path),
+                    asyncio.to_thread(extract_features, result.file_path),
+                )
+                return track, embedding, raw_features
+
+        # First pass: emit cached hits immediately, queue the rest for workers.
+        sem = asyncio.Semaphore(EXTRACT_WORKERS)
+        pending: set[asyncio.Task] = set()
+        for track in body.tracks:
             cached_emb = await asyncio.to_thread(get_cached_embedding, track.spotify_id)
             if cached_emb is not None:
                 extracted += 1
+                processed += 1
                 yield send({
                     "type": "progress",
                     "message": f"Cached: {track.name}",
-                    "current": i + 1,
+                    "current": processed,
                     "total": total,
                     "extracted": extracted,
                     "failed": failed,
                     "feature": {track.spotify_id: cached_emb},
                 })
                 continue
+            pending.add(asyncio.create_task(process(track)))
 
-            query = TrackQuery(
-                spotify_id=track.spotify_id,
-                name=track.name,
-                artist=track.artist,
-                duration_ms=track.duration_ms,
-            )
-
-            yield send({
-                "type": "progress",
-                "message": f"Processing: {track.name} — {track.artist}",
-                "current": i + 1,
-                "total": total,
-                "extracted": extracted,
-                "failed": failed,
-            })
-
-            # Search + download (persistent directory, checks cache)
-            result = await asyncio.to_thread(
-                search_and_download, yt, query
-            )
-
-            if result is None:
-                failed += 1
-                continue
-
-            # Extract TF embedding + raw features concurrently
-            embedding, raw_features = await asyncio.gather(
-                asyncio.to_thread(extract_embedding, result.file_path),
-                asyncio.to_thread(extract_features, result.file_path),
-            )
-
-            if embedding is not None:
-                await asyncio.to_thread(
-                    cache_embedding, track.spotify_id, embedding
+        # Drain worker tasks as they complete; poll for client disconnect.
+        while pending:
+            if await request.is_disconnected():
+                logger.info(
+                    "Client disconnected, cancelling %d pending tracks", len(pending)
                 )
+                for t in pending:
+                    t.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                return
+
+            done, pending = await asyncio.wait(
+                pending, timeout=1.0, return_when=asyncio.FIRST_COMPLETED
+            )
+            for t in done:
+                try:
+                    track, embedding, raw_features = t.result()
+                except Exception:
+                    logger.exception("Worker task failed")
+                    failed += 1
+                    processed += 1
+                    continue
+
+                processed += 1
+                if embedding is None:
+                    failed += 1
+                    yield send({
+                        "type": "progress",
+                        "message": f"Failed: {track.name}",
+                        "current": processed,
+                        "total": total,
+                        "extracted": extracted,
+                        "failed": failed,
+                    })
+                    continue
+
+                await asyncio.to_thread(cache_embedding, track.spotify_id, embedding)
                 if raw_features is not None:
                     await asyncio.to_thread(
                         cache_features, track.spotify_id, raw_features
@@ -514,14 +550,12 @@ async def run_feature_extraction(body: FeaturesRequest, request: Request):
                 yield send({
                     "type": "progress",
                     "message": f"Extracted: {track.name}",
-                    "current": i + 1,
+                    "current": processed,
                     "total": total,
                     "extracted": extracted,
                     "failed": failed,
                     "feature": {track.spotify_id: embedding},
                 })
-            else:
-                failed += 1
 
         # Return summary with all cached embeddings
         all_embeddings = await asyncio.to_thread(get_all_cached_embeddings)
