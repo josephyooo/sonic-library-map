@@ -113,3 +113,51 @@ export function cacheLibrary(userId: string, data: LibraryData) {
     data.fetchedAt,
   );
 }
+
+// Partial cache: written after the expensive per-playlist fetches complete but
+// before audio_features / artists. fetched_at = 0 is the sentinel —
+// getCachedLibrary rejects it (age > TTL); getPartialLibrary picks it up for
+// resume.
+export function savePartialLibrary(
+  userId: string,
+  data: {
+    tracks: LibraryData["tracks"];
+    playlists: LibraryData["playlists"];
+    playlistTracks: LibraryData["playlistTracks"];
+  },
+): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO library_cache
+     (user_id, tracks, playlists, playlist_tracks, audio_features, artists, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+  ).run(
+    userId,
+    JSON.stringify(data.tracks),
+    JSON.stringify(data.playlists),
+    JSON.stringify(data.playlistTracks),
+    "[]",
+    "[]",
+  );
+}
+
+export function getPartialLibrary(userId: string): {
+  tracks: LibraryData["tracks"];
+  playlists: LibraryData["playlists"];
+  playlistTracks: LibraryData["playlistTracks"];
+} | null {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT tracks, playlists, playlist_tracks FROM library_cache WHERE user_id = ? AND fetched_at = 0",
+    )
+    .get(userId) as
+    | { tracks: string; playlists: string; playlist_tracks: string }
+    | undefined;
+  if (!row) return null;
+  return {
+    tracks: JSON.parse(row.tracks),
+    playlists: JSON.parse(row.playlists),
+    playlistTracks: JSON.parse(row.playlist_tracks),
+  };
+}

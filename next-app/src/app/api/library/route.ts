@@ -8,7 +8,13 @@ import {
   getAudioFeatures,
   getArtists,
 } from "@/lib/spotify";
-import { getCachedLibrary, cacheLibrary, type LibraryData } from "@/lib/db";
+import {
+  getCachedLibrary,
+  cacheLibrary,
+  savePartialLibrary,
+  getPartialLibrary,
+  type LibraryData,
+} from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -67,37 +73,54 @@ export async function GET() {
       }
 
       try {
-        // 1. Fetch saved tracks
-        const savedTracks = await getSavedTracks(auth.accessToken, sendProgress);
+        // Resume from partial cache if a prior run failed after per-playlist fetches.
+        const partial = getPartialLibrary(auth.userId);
+        let tracks: Awaited<ReturnType<typeof getSavedTracks>>;
+        let playlists: Awaited<ReturnType<typeof getUserPlaylists>>;
+        let playlistTracks: Record<string, string[]>;
 
-        // 2. Fetch playlists, then keep only ones the user created
-        const allPlaylists = await getUserPlaylists(
-          auth.accessToken,
-          sendProgress,
-        );
-        const playlists = allPlaylists.filter(
-          (p) => p.owner.id === auth.userId,
-        );
-
-        // 3. Fetch tracks for each owned playlist; merge into the library
-        const playlistTracks: Record<string, string[]> = {};
-        const tracksById = new Map(
-          savedTracks.filter((t) => t.id).map((t) => [t.id, t]),
-        );
-        for (let i = 0; i < playlists.length; i++) {
-          sendProgress("Fetching playlist tracks", i + 1, playlists.length);
-          const pTracks = await getPlaylistTracks(
-            playlists[i].id,
+        if (partial) {
+          sendProgress("Resuming from checkpoint", 1, 1);
+          tracks = partial.tracks;
+          playlists = partial.playlists;
+          playlistTracks = partial.playlistTracks;
+        } else {
+          // 1. Fetch saved tracks
+          const savedTracks = await getSavedTracks(
             auth.accessToken,
+            sendProgress,
           );
-          // Local files have empty/null ids on both track and artists — skip
-          const realTracks = pTracks.filter((t) => t.id);
-          playlistTracks[playlists[i].id] = realTracks.map((t) => t.id);
-          for (const t of realTracks) {
-            if (!tracksById.has(t.id)) tracksById.set(t.id, t);
+
+          // 2. Fetch playlists, then keep only ones the user created
+          const allPlaylists = await getUserPlaylists(
+            auth.accessToken,
+            sendProgress,
+          );
+          playlists = allPlaylists.filter((p) => p.owner.id === auth.userId);
+
+          // 3. Fetch tracks for each owned playlist; merge into the library
+          playlistTracks = {};
+          const tracksById = new Map(
+            savedTracks.filter((t) => t.id).map((t) => [t.id, t]),
+          );
+          for (let i = 0; i < playlists.length; i++) {
+            sendProgress("Fetching playlist tracks", i + 1, playlists.length);
+            const pTracks = await getPlaylistTracks(
+              playlists[i].id,
+              auth.accessToken,
+            );
+            // Local files have empty/null ids on both track and artists — skip
+            const realTracks = pTracks.filter((t) => t.id);
+            playlistTracks[playlists[i].id] = realTracks.map((t) => t.id);
+            for (const t of realTracks) {
+              if (!tracksById.has(t.id)) tracksById.set(t.id, t);
+            }
           }
+          tracks = [...tracksById.values()];
+
+          // Checkpoint before the steps that previously failed (audio features / artists)
+          savePartialLibrary(auth.userId, { tracks, playlists, playlistTracks });
         }
-        const tracks = [...tracksById.values()];
 
         // 4. Try to fetch audio features for every track in the library
         // Note: Spotify deprecated this endpoint for new apps (Nov 2024)
