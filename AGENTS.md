@@ -52,6 +52,7 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - `preview_url` is null for all tracks — Spotify no longer provides preview audio for new apps.
 
 ### Audio feature extraction (Python sidecar)
+- The sidecar env is defined in `umap-service/environment.yml` (conda-forge). `essentia-tensorflow` is the **only** essentia package — never install plain `essentia` alongside it, pip picks the last wheel and silently strips the TF algorithms (e.g. `TensorflowPredictEffnetDiscogs` becomes unimportable).
 - Spotify provides no usable audio. Features are extracted via a YouTube Music pipeline: `ytmusicapi` search → `yt-dlp` download → Essentia extraction.
 - **ytmusicapi uses browser auth** (cookie-based, no API quota limits). Google Cloud OAuth auth is impractical (100 searches/day at 100 units/search).
 - Audio files are **persisted** in `umap-service/data/audio/` during development (tracked in `downloads` SQLite table). This avoids re-downloading if the extraction approach pivots. Re-enable deletion in production.
@@ -80,6 +81,7 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - `d3.quadtree` for all spatial queries (hover hit-testing, viewport culling).
 - Scales (`d3.scaleLinear`) should be memoized with `useMemo`, not recreated per frame.
 - The `draw()` function is the single entry point for all canvas rendering — called on zoom, hover, and data changes.
+- **Cluster hulls use the playlist-hull code path.** In UMAP mode, HDBSCAN cluster labels from `/api/cluster` are synthesized into `_cluster_<label>` virtual playlists (skipping noise = -1) and concatenated into `scatterPlotColors`. They render as hulls but are NOT added to `PlaylistLegend`. `ClusterPanel` is no longer mounted — the text panel was replaced by on-map hulls.
 
 ### Data flow
 - Library data is fetched via SSE from `/api/library` and consumed by `LibraryLoader.tsx`.
@@ -89,6 +91,7 @@ This project uses Next.js 16 (not 14 or 15). Key differences from training data:
 - UMAP view auto-loads cached features via `GET /api/features` on first switch. Extract button only shown in UMAP mode.
 - Genre view fetches lazily via `GET /api/genres` (SQLite-cached, 1-week TTL). Tracks mapped by averaging their artists' genre coordinates from Every Noise.
 - Toggling playlists controls color/hull visibility only — songs are never hidden, only grayed out.
+- A frozen JSON snapshot of the library + coords + labels can be exported via `next-app/scripts/export-demo.mjs` for the read-only static demo at `../site/public/demo/spotify/`.
 
 ## Domain knowledge
 

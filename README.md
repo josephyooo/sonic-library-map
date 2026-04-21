@@ -21,7 +21,7 @@ An interactive web app that plots your entire Spotify library as a scatter plot,
 ### Prerequisites
 
 - Node.js 20+
-- Python 3.11+ (for the analysis sidecar)
+- `conda` / `mamba` / `micromamba` (the sidecar env is defined in `umap-service/environment.yml`; `essentia-tensorflow` is only on conda-forge + a pre-release PyPI wheel, so pip alone is brittle)
 - A [Spotify Developer App](https://developer.spotify.com/dashboard) with your email added under User Management
 - YouTube Music browser auth headers (for audio sourcing — see [ytmusicapi setup](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html))
 
@@ -41,7 +41,22 @@ Use `127.0.0.1`, not `localhost` — Spotify rejects HTTP localhost redirect URI
 
 ### 2. Run in development
 
+Create the sidecar env once:
+
 ```bash
+cd umap-service
+conda env create -f environment.yml  # or: mamba / micromamba
+```
+
+Then run both services:
+
+```bash
+# terminal 1 — Python sidecar
+cd umap-service
+conda activate spotify-project
+uvicorn main:app --host 127.0.0.1 --port 8000
+
+# terminal 2 — Next.js app
 cd next-app
 npm install
 npm run dev
@@ -97,7 +112,19 @@ umap-service/
 
 ## Current state
 
-Phases 0 through 7 are complete. Feature extraction uses Discogs-EffNet TF embeddings (1280-dim learned musical similarity) for UMAP, with raw spectral features (41-dim) retained for the "Color by" overlay. The pipeline, UI, and all phases are fully functional. See [PLAN.md](PLAN.md) for details.
+Phases 0 through 7 are complete. Feature extraction uses Discogs-EffNet TF embeddings (1280-dim learned musical similarity) for UMAP, with raw spectral features (41-dim) retained for the "Color by" overlay. HDBSCAN cluster hulls render directly on the UMAP map (one polygon per cluster, noise points stay uncontained). The pipeline, UI, and all phases are fully functional. See [PLAN.md](PLAN.md) for details.
+
+## Static demo export
+
+The Next app ships a helper that snapshots the library + UMAP coords + cluster labels + raw features into JSON files for a read-only static deployment:
+
+```bash
+cd next-app
+# sidecar must be running at http://127.0.0.1:8000 for cluster labels
+node scripts/export-demo.mjs [outDir]
+```
+
+Default `outDir` is `../../site/public/demo/spotify` — adjust as needed. Output bundle is roughly 900 KB for a 900-track library.
 
 ## Known limitations
 
