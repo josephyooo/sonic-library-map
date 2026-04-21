@@ -20,8 +20,14 @@ The feature vector is 41 dimensions:
 
 import logging
 
+import essentia
 import essentia.standard as es
 import numpy as np
+
+# Silence Essentia's C++-layer warnings — the recurring "No network created"
+# message is a known false positive when running the one-shot (standard) API.
+essentia.log.warningActive = False
+essentia.log.infoActive = False
 
 logger = logging.getLogger(__name__)
 

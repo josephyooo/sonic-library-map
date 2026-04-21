@@ -12,7 +12,12 @@ for the "Color by" overlay (BPM, loudness, etc.).
 import logging
 import os
 
+import essentia
 import numpy as np
+
+# Silence Essentia's C++-layer warnings (shared with feature_extract).
+essentia.log.warningActive = False
+essentia.log.infoActive = False
 
 logger = logging.getLogger(__name__)
 
