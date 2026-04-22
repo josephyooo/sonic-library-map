@@ -96,6 +96,16 @@ if (bestCoords) {
   }
 }
 
+// ─── YouTube matches (for hover preview player) ─────────────────────────
+const ytRows = sideDb
+  .prepare("SELECT spotify_id, video_id, duration_s FROM youtube_matches")
+  .all();
+const youtubeIds = {};
+for (const row of ytRows) {
+  if (!trackIds.has(row.spotify_id)) continue;
+  youtubeIds[row.spotify_id] = [row.video_id, row.duration_s];
+}
+
 // ─── Raw features ────────────────────────────────────────────────────────
 const rawFeatureRows = sideDb
   .prepare("SELECT spotify_id, features FROM audio_features")
@@ -197,6 +207,7 @@ const bundle = {
   "umap.json": { coordinates: umapCoords },
   "genres.json": { coordinates: genreCoords },
   "raw-features.json": { features: rawFeatures },
+  "youtube-ids.json": { ids: youtubeIds },
 };
 if (clusterInsights) {
   bundle["clusters.json"] = { insights: clusterInsights, labels: clusterLabels };
@@ -212,7 +223,7 @@ for (const [name, data] of Object.entries(bundle)) {
 console.log(`\nExported to ${OUT}`);
 console.log(`Tracks: ${tracks.length} | UMAP: ${Object.keys(umapCoords).length} | ` +
   `Genres: ${Object.keys(genreCoords).length} | Raw features: ${Object.keys(rawFeatures).length} | ` +
-  `Clusters: ${clusterInsights?.length ?? "skipped"}`);
+  `YT ids: ${Object.keys(youtubeIds).length} | Clusters: ${clusterInsights?.length ?? "skipped"}`);
 
 nextDb.close();
 sideDb.close();
