@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import type { LibraryData, PlotPoint } from "@/lib/types";
+import type { ClusterInsight, LibraryData, PlotPoint } from "@/lib/types";
 import LibraryLoader from "@/components/LibraryLoader";
 import ScatterPlot, {
   type PlaylistColor,
@@ -11,7 +11,6 @@ import SongTooltip from "@/components/SongTooltip";
 import PlaylistLegend from "@/components/PlaylistLegend";
 import FeatureExtractor from "@/components/FeatureExtractor";
 import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
-import type { ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay, { OVERLAY_FEATURES } from "@/components/FeatureOverlay";
 import AxisSelector, { AXIS_YEAR, AXIS_POPULARITY } from "@/components/AxisSelector";
 import PreviewPlayer from "@/components/PreviewPlayer";

@@ -21,3 +21,11 @@ export interface PlotPoint {
   track: SpotifyTrack;
   playlistIds: string[];
 }
+
+export interface ClusterInsight {
+  type: "potential_playlist" | "discordant_playlist";
+  title: string;
+  description: string;
+  track_ids: string[];
+  score: number;
+}
