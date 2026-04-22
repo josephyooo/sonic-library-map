@@ -20,6 +20,10 @@ export interface GenreCoord {
 const EVERYNOISE_URL = "https://everynoise.com";
 const CANVAS_WIDTH = 1610;
 
+function decodeHtmlEntities(value: string): string {
+  return cheerio.load(value).root().text();
+}
+
 export async function scrapeGenreCoordinates(): Promise<GenreCoord[]> {
   const response = await fetch(EVERYNOISE_URL, {
     signal: AbortSignal.timeout(30_000),
@@ -53,12 +57,14 @@ export function parseGenreCoordinates(html: string): GenreCoord[] {
     if (!topMatch || !leftMatch) return;
 
     // Extract genre name from onclick: playx("...", "genre name", this)
-    const nameMatch = onclick.match(/playx\([^,]+,\s*"([^"]+)"/);
-    // Some genres use &quot; entities
-    const nameMatch2 = onclick.match(
-      /playx\([^,]+,\s*&quot;([^&]+)&quot;/,
-    );
-    const name = nameMatch?.[1] ?? nameMatch2?.[1];
+    const decodedOnclick = decodeHtmlEntities(onclick);
+    const doubleQuotedName = decodedOnclick.match(
+      /playx\([^,]+,\s*"([^"]+)"/,
+    )?.[1];
+    const singleQuotedName = decodedOnclick.match(
+      /playx\([^,]+,\s*'([^']+)'/,
+    )?.[1];
+    const name = doubleQuotedName ?? singleQuotedName;
     if (!name) return;
 
     const top = parseInt(topMatch[1], 10);
