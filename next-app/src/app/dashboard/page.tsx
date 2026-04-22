@@ -25,16 +25,18 @@ export default async function Dashboard() {
           <span className="text-sm" style={{ color: "var(--ctp-subtext0)" }}>
             {session.displayName}
           </span>
-          <a
-            href="/api/auth/logout"
-            className="rounded-full px-3 py-1 text-sm transition-colors"
-            style={{
-              border: "1px solid var(--ctp-surface1)",
-              color: "var(--ctp-subtext1)",
-            }}
-          >
-            Log out
-          </a>
+          <form action="/api/auth/logout" method="post">
+            <button
+              type="submit"
+              className="rounded-full px-3 py-1 text-sm transition-colors"
+              style={{
+                border: "1px solid var(--ctp-surface1)",
+                color: "var(--ctp-subtext1)",
+              }}
+            >
+              Log out
+            </button>
+          </form>
         </div>
       </header>
       <main className="flex-1 overflow-hidden">
