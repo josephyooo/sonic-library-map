@@ -6,7 +6,7 @@ Maps your **Spotify library** as an interactive 2D scatter plot of Essentia + Di
 
 Each track is extracted from YouTube, analyzed with Essentia's Discogs-EffNet model (1280-dim learned musical similarity), and projected to 2D via UMAP.
 
-Inspired by [Every Noise at Once](https://everynoise.com).
+Try an interactive demo at https://josyoo.com/work/spotify-umap/.
 
 ![UMAP view of a 1,160-track library, colored by playlist with HDBSCAN cluster hulls](docs/preview.png)
 
