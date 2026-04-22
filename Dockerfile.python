@@ -5,11 +5,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY umap-service/environment.yml .
+COPY --chown=mambauser:mambauser umap-service/environment.yml .
 RUN micromamba env create -y -f environment.yml && \
     micromamba clean --all --yes
 
-COPY umap-service/ .
+COPY --chown=mambauser:mambauser umap-service/ .
+RUN mkdir -p /app/data/audio /app/models && \
+    chown -R mambauser:mambauser /app
 
+USER mambauser
 EXPOSE 8000
 CMD ["micromamba", "run", "-n", "spotify-project", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
