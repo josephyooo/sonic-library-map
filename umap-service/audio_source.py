@@ -11,6 +11,7 @@ and extracted features are cached indefinitely.
 
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -24,6 +25,26 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.environ.get("FEATURES_DB_PATH", os.path.join(os.path.dirname(__file__), "data", "features.db"))
 AUDIO_DIR = os.environ.get("AUDIO_DIR", os.path.join(os.path.dirname(__file__), "data", "audio"))
+
+
+def _sanitize_float_vector(values: list[float]) -> list[float]:
+    """Normalize cached vectors so legacy NaN/Infinity rows cannot poison JSON."""
+    clean: list[float] = []
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = 0.0
+        clean.append(number if math.isfinite(number) else 0.0)
+    return clean
+
+
+def _load_float_vector(raw_json: str) -> list[float]:
+    return _sanitize_float_vector(json.loads(raw_json))
+
+
+def _dump_strict_json(value: object) -> str:
+    return json.dumps(value, allow_nan=False)
 
 
 @dataclass
@@ -137,14 +158,14 @@ def get_cached_features(spotify_id: str) -> list[float] | None:
     conn.close()
     if row is None:
         return None
-    return json.loads(row[0])
+    return _load_float_vector(row[0])
 
 
 def cache_features(spotify_id: str, features: list[float]) -> None:
     conn = _get_db()
     conn.execute(
         "INSERT OR REPLACE INTO audio_features (spotify_id, features) VALUES (?, ?)",
-        (spotify_id, json.dumps(features)),
+        (spotify_id, _dump_strict_json(_sanitize_float_vector(features))),
     )
     conn.commit()
     conn.close()
@@ -154,7 +175,7 @@ def get_all_cached_features() -> dict[str, list[float]]:
     conn = _get_db()
     rows = conn.execute("SELECT spotify_id, features FROM audio_features").fetchall()
     conn.close()
-    return {row[0]: json.loads(row[1]) for row in rows}
+    return {row[0]: _load_float_vector(row[1]) for row in rows}
 
 
 # ─── TF Embedding Cache ─────────────────────────────────────────────────────
@@ -169,14 +190,14 @@ def get_cached_embedding(spotify_id: str) -> list[float] | None:
     conn.close()
     if row is None:
         return None
-    return json.loads(row[0])
+    return _load_float_vector(row[0])
 
 
 def cache_embedding(spotify_id: str, embedding: list[float]) -> None:
     conn = _get_db()
     conn.execute(
         "INSERT OR REPLACE INTO tf_embeddings (spotify_id, embedding) VALUES (?, ?)",
-        (spotify_id, json.dumps(embedding)),
+        (spotify_id, _dump_strict_json(_sanitize_float_vector(embedding))),
     )
     conn.commit()
     conn.close()
@@ -186,7 +207,7 @@ def get_all_cached_embeddings() -> dict[str, list[float]]:
     conn = _get_db()
     rows = conn.execute("SELECT spotify_id, embedding FROM tf_embeddings").fetchall()
     conn.close()
-    return {row[0]: json.loads(row[1]) for row in rows}
+    return {row[0]: _load_float_vector(row[1]) for row in rows}
 
 
 # ─── YouTube Music Search ────────────────────────────────────────────────────

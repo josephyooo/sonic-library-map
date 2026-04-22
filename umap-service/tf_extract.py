@@ -86,6 +86,7 @@ def extract_embedding(file_path: str) -> list[float] | None:
 
         # Average across patches for a single track-level embedding
         embedding = np.mean(embeddings, axis=0)
+        embedding = np.nan_to_num(embedding, nan=0.0, posinf=0.0, neginf=0.0)
         return embedding.tolist()
     except Exception as e:
         logger.warning("TF embedding extraction failed for %s: %s", file_path, e)
