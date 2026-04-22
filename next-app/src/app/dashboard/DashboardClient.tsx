@@ -14,6 +14,7 @@ import ViewToggle, { type ViewMode } from "@/components/ViewToggle";
 import type { ClusterInsight } from "@/components/ClusterPanel";
 import FeatureOverlay, { OVERLAY_FEATURES } from "@/components/FeatureOverlay";
 import AxisSelector, { AXIS_YEAR, AXIS_POPULARITY } from "@/components/AxisSelector";
+import PreviewPlayer from "@/components/PreviewPlayer";
 import { handleApiError, parseAxisLabel } from "@/lib/api";
 import * as d3 from "d3";
 
@@ -64,6 +65,11 @@ export default function DashboardClient() {
   const [highlightedTracks, setHighlightedTracks] = useState<Set<string> | null>(null);
   const [customXIdx, setCustomXIdx] = useState(AXIS_YEAR);
   const [customYIdx, setCustomYIdx] = useState(AXIS_POPULARITY);
+  const [youtubeIds, setYoutubeIds] = useState<Record<string, [string, number]>>({});
+  const [previewEnabled, setPreviewEnabled] = useState(false);
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
+  const [previewStart, setPreviewStart] = useState(30);
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "waiting" | "loading" | "playing">("idle");
 
   // Auto-load cached features when UMAP is first selected
   useEffect(() => {
@@ -181,6 +187,47 @@ export default function DashboardClient() {
   const handleHighlight = useCallback((trackIds: string[] | null) => {
     setHighlightedTracks(trackIds ? new Set(trackIds) : null);
   }, []);
+
+  // Load YouTube IDs once per session for hover-preview playback.
+  useEffect(() => {
+    if (!libraryData) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/youtube-ids");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setYoutubeIds(data.ids ?? {});
+      } catch {
+        // silent — preview just won't work
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [libraryData]);
+
+  // Hover-triggered preview: wait 1s on the same point, then cue up its YT video.
+  const hoveredId = hovered?.point.id ?? null;
+  useEffect(() => {
+    if (!previewEnabled || !hoveredId) {
+      setPreviewVideoId(null);
+      setPreviewStatus("idle");
+      return;
+    }
+    const match = youtubeIds[hoveredId];
+    if (!match) {
+      setPreviewVideoId(null);
+      setPreviewStatus("idle");
+      return;
+    }
+    const [videoId, durationS] = match;
+    setPreviewStatus("waiting");
+    const timer = setTimeout(() => {
+      setPreviewStart(durationS > 60 ? Math.max(0, Math.floor(durationS / 3)) : 0);
+      setPreviewVideoId(videoId);
+      setPreviewStatus("loading");
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [hoveredId, previewEnabled, youtubeIds]);
 
   // Custom axes: build coordinate map from raw features or track metadata
   const customCoords = useMemo((): Record<string, [number, number]> | null => {
@@ -515,6 +562,7 @@ export default function DashboardClient() {
           <SongTooltip
             info={hovered}
             playlistNames={playlistNames}
+            previewStatus={previewEnabled ? previewStatus : "idle"}
             featureLabel={(() => {
               if (colorFeatureIdx === null || !rawFeatures) return null;
               const feat = OVERLAY_FEATURES.find((f) => f.idx === colorFeatureIdx);
@@ -524,6 +572,27 @@ export default function DashboardClient() {
             })()}
           />
         )}
+        <button
+          type="button"
+          onClick={() => setPreviewEnabled((v) => !v)}
+          className="absolute bottom-4 right-4 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs text-zinc-300 backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+          title={previewEnabled ? "Hover a point for 1s to preview" : "Enable YouTube preview on hover"}
+        >
+          {previewEnabled ? "🔊 Preview: on" : "🔇 Preview: off"}
+        </button>
+        <PreviewPlayer
+          videoId={previewVideoId}
+          startSeconds={previewStart}
+          enabled={previewEnabled}
+          onStateChange={(s) => {
+            setPreviewStatus((prev) => {
+              if (s === "playing") return "playing";
+              if (s === "buffering") return prev === "playing" ? "playing" : "loading";
+              if (s === "stopped") return prev === "waiting" ? "waiting" : "idle";
+              return prev;
+            });
+          }}
+        />
       </div>
 
       <div className="flex w-56 flex-col overflow-y-auto">

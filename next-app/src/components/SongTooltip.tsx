@@ -1,14 +1,28 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { HoveredPoint } from "./ScatterPlot";
 
 interface SongTooltipProps {
   info: HoveredPoint;
   playlistNames: Map<string, string>;
   featureLabel?: string | null;
+  previewStatus?: "idle" | "waiting" | "loading" | "playing";
 }
 
-export default function SongTooltip({ info, playlistNames, featureLabel }: SongTooltipProps) {
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+function useSpinnerFrame(active: boolean) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return SPINNER_FRAMES[frame];
+}
+
+export default function SongTooltip({ info, playlistNames, featureLabel, previewStatus = "idle" }: SongTooltipProps) {
   const { point, screenX, screenY } = info;
   const { track } = point;
   const albumArt = track.album.images.find((img) => img.width <= 64)?.url
@@ -27,6 +41,14 @@ export default function SongTooltip({ info, playlistNames, featureLabel }: SongT
   const playlists = point.playlistIds
     .map((id) => playlistNames.get(id))
     .filter(Boolean);
+
+  const spinnerActive = previewStatus !== "idle";
+  const spinner = useSpinnerFrame(spinnerActive);
+  const statusLabel =
+    previewStatus === "waiting" ? "hold hover…"
+    : previewStatus === "loading" ? "loading…"
+    : previewStatus === "playing" ? "playing"
+    : null;
 
   return (
     <div
@@ -57,6 +79,12 @@ export default function SongTooltip({ info, playlistNames, featureLabel }: SongT
             {playlists.length === 1
               ? playlists[0]
               : `${playlists[0]} +${playlists.length - 1} more`}
+          </p>
+        )}
+        {statusLabel && (
+          <p className="font-mono text-xs text-zinc-500">
+            <span className="mr-1">{spinner}</span>
+            {statusLabel}
           </p>
         )}
       </div>
