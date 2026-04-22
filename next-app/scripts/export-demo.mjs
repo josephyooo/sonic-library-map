@@ -37,7 +37,9 @@ if (!libRow) throw new Error("No library_cache row — run a Spotify sync first"
 const rawTracks = JSON.parse(libRow.tracks);
 const rawPlaylists = JSON.parse(libRow.playlists);
 const playlistTracks = JSON.parse(libRow.playlist_tracks);
-const rawArtists = JSON.parse(libRow.artists);
+const rawArtists = JSON.parse(libRow.artists).filter(
+  (a) => a && typeof a === "object" && typeof a.id === "string",
+);
 
 // Pick the smallest album image (usually 64px) to keep bundle tiny
 function smallestImage(images) {
