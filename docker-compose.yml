@@ -15,6 +15,12 @@ services:
     depends_on:
       umap:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "-T", "3", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   umap:
     build:
