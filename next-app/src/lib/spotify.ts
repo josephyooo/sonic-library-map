@@ -7,6 +7,7 @@ const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET!;
 const REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI!;
+const MAX_RETRY_AFTER_SECONDS = 60;
 
 // Rate limiter: Spotify allows ~30 req/sec, we use concurrency 10 to be safe
 const queue = new PQueue({ concurrency: 10, interval: 1000, intervalCap: 25 });
@@ -164,7 +165,13 @@ async function spotifyFetch<T>(url: string, accessToken: string): Promise<T> {
 
     if (response.status === 429) {
       const retryAfter = parseInt(response.headers.get("Retry-After") || "1", 10);
-      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+      const waitSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1;
+      if (waitSeconds > MAX_RETRY_AFTER_SECONDS) {
+        throw new Error(
+          `Spotify rate limit asks to retry after ${waitSeconds}s; refusing to block the queue longer than ${MAX_RETRY_AFTER_SECONDS}s`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, waitSeconds * 1000));
       // Retry once after waiting
       const retry = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` },
