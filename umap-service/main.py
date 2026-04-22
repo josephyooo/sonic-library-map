@@ -422,6 +422,25 @@ async def get_cached(body: CachedFeaturesRequest):
     }
 
 
+@app.post("/youtube-ids")
+async def get_youtube_ids(body: CachedFeaturesRequest):
+    """Return cached (video_id, duration_s) for each requested track ID."""
+    def query():
+        from audio_source import _get_db  # lazy — keeps module import surface small
+        conn = _get_db()
+        rows = conn.execute(
+            "SELECT spotify_id, video_id, duration_s FROM youtube_matches",
+        ).fetchall()
+        requested = set(body.track_ids)
+        return {
+            row[0]: [row[1], row[2]]
+            for row in rows
+            if row[0] in requested
+        }
+    ids = await asyncio.to_thread(query)
+    return {"ids": ids}
+
+
 # ─── Audio sourcing (Phase 4a) ──────────────────────────────────────────────
 
 
