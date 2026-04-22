@@ -220,13 +220,9 @@ export default function DashboardClient() {
       return;
     }
     const [videoId, durationS] = match;
-    setPreviewStatus("waiting");
-    const timer = setTimeout(() => {
-      setPreviewStart(durationS > 60 ? Math.max(0, Math.floor(durationS / 3)) : 0);
-      setPreviewVideoId(videoId);
-      setPreviewStatus("loading");
-    }, 1000);
-    return () => clearTimeout(timer);
+    setPreviewStart(durationS > 60 ? Math.max(0, Math.floor(durationS / 3)) : 0);
+    setPreviewVideoId(videoId);
+    setPreviewStatus("loading");
   }, [hoveredId, previewEnabled, youtubeIds]);
 
   // Custom axes: build coordinate map from raw features or track metadata
