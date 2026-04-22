@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="UMAP Service", version="0.2.0")
 
 DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
+SQLITE_IN_CHUNK_SIZE = 500
 
 # Unauthenticated YTMusic client — sufficient for search
 _yt: YTMusic | None = None
@@ -451,16 +452,25 @@ async def get_youtube_ids(body: CachedFeaturesRequest):
     """Return cached (video_id, duration_s) for each requested track ID."""
     def query():
         from audio_source import _get_db  # lazy — keeps module import surface small
+        requested = list(dict.fromkeys(body.track_ids))
+        if not requested:
+            return {}
+
         conn = _get_db()
-        rows = conn.execute(
-            "SELECT spotify_id, video_id, duration_s FROM youtube_matches",
-        ).fetchall()
-        requested = set(body.track_ids)
-        return {
-            row[0]: [row[1], row[2]]
-            for row in rows
-            if row[0] in requested
-        }
+        ids: dict[str, list] = {}
+        try:
+            for start in range(0, len(requested), SQLITE_IN_CHUNK_SIZE):
+                batch = requested[start:start + SQLITE_IN_CHUNK_SIZE]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"SELECT spotify_id, video_id, duration_s FROM youtube_matches WHERE spotify_id IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                for row in rows:
+                    ids[row[0]] = [row[1], row[2]]
+        finally:
+            conn.close()
+        return ids
     ids = await asyncio.to_thread(query)
     return {"ids": ids}
 
