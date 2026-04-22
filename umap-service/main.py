@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -37,6 +38,25 @@ DEBUG_MODE = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
 # Unauthenticated YTMusic client — sufficient for search
 _yt: YTMusic | None = None
+
+
+def _sanitize_float_vector(values: list[float]) -> list[float]:
+    clean: list[float] = []
+    for value in values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            number = 0.0
+        clean.append(number if math.isfinite(number) else 0.0)
+    return clean
+
+
+def _sanitize_float_map(values: dict[str, list[float]]) -> dict[str, list[float]]:
+    return {key: _sanitize_float_vector(vector) for key, vector in values.items()}
+
+
+def _dump_strict_json(value: object) -> str:
+    return json.dumps(value, allow_nan=False)
 
 
 def get_yt() -> YTMusic:
@@ -94,6 +114,7 @@ def _compute_umap(
         return UMAPResponse(coordinates={})
 
     matrix = np.array([features[tid] for tid in valid_ids], dtype=np.float64)
+    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
 
     # Check cache (key includes UMAP parameters so different settings get separate entries)
     key_input = matrix.tobytes() + f"|{n_neighbors}|{min_dist}".encode()
@@ -114,6 +135,7 @@ def _compute_umap(
         raw_ids = [tid for tid in valid_ids if tid in raw_features]
         if len(raw_ids) > 10:
             raw_matrix = np.array([raw_features[tid] for tid in raw_ids], dtype=np.float64)
+            raw_matrix = np.nan_to_num(raw_matrix, nan=0.0, posinf=0.0, neginf=0.0)
             raw_coords_x = np.array([coordinates[tid][0] for tid in raw_ids])
             raw_coords_y = np.array([coordinates[tid][1] for tid in raw_ids])
             x_axis = _best_axis_correlation(raw_matrix, raw_coords_x, AXIS_FEATURE_NAMES)
@@ -129,7 +151,7 @@ def _run_numba_subprocess(script: str, input_data: dict, timeout: int, label: st
     """
     result = subprocess.run(
         [sys.executable, "-c", script],
-        input=json.dumps(input_data),
+        input=_dump_strict_json(input_data),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -159,7 +181,8 @@ if normalized.shape[1] > 50:
 
 eff_neighbors = max(2, min(n_neighbors, matrix.shape[0] - 1))
 coords = UMAP(n_components=2, n_neighbors=eff_neighbors, min_dist=min_dist, random_state=42, n_jobs=1).fit_transform(normalized)
-print(json.dumps(coords.tolist()))
+coords = np.nan_to_num(coords, nan=0.0, posinf=0.0, neginf=0.0)
+print(json.dumps(coords.tolist(), allow_nan=False))
 """
 
 _HDBSCAN_SCRIPT = """
@@ -169,7 +192,7 @@ from hdbscan import HDBSCAN
 data = json.loads(sys.stdin.read())
 matrix = np.array(data["matrix"], dtype=np.float64)
 labels = HDBSCAN(min_cluster_size=data["min_cluster_size"], min_samples=3).fit_predict(matrix)
-print(json.dumps(labels.tolist()))
+print(json.dumps(labels.tolist(), allow_nan=False))
 """
 
 
@@ -249,7 +272,7 @@ def _get_umap_cache(cache_key: str) -> dict[str, list[float]] | None:
     conn.close()
     if row is None:
         return None
-    return json.loads(row[0])
+    return _sanitize_float_map(json.loads(row[0]))
 
 
 def _cache_umap(cache_key: str, coordinates: dict[str, list[float]]) -> None:
@@ -257,7 +280,7 @@ def _cache_umap(cache_key: str, coordinates: dict[str, list[float]]) -> None:
     conn = _get_db()
     conn.execute(
         "INSERT OR REPLACE INTO umap_cache (cache_key, coordinates) VALUES (?, ?)",
-        (cache_key, json.dumps(coordinates)),
+        (cache_key, _dump_strict_json(_sanitize_float_map(coordinates))),
     )
     conn.commit()
     conn.close()
@@ -309,6 +332,7 @@ def _compute_clusters(
         return ClusterResponse(labels={}, insights=[])
 
     matrix = np.array([coordinates[tid] for tid in track_ids], dtype=np.float64)
+    matrix = np.nan_to_num(matrix, nan=0.0, posinf=0.0, neginf=0.0)
 
     labels_list = _run_hdbscan_subprocess(matrix, min_cluster_size)
 
@@ -479,7 +503,7 @@ async def run_feature_extraction(body: FeaturesRequest, request: Request):
 
     async def generate():
         def send(obj: dict):
-            return f"data: {json.dumps(obj)}\n\n"
+            return f"data: {_dump_strict_json(obj)}\n\n"
 
         yt = get_yt()
         total = len(body.tracks)

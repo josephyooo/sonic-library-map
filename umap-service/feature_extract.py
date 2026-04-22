@@ -181,4 +181,7 @@ def _compute_features(audio: np.ndarray) -> list[float]:
     ])
 
     assert len(features) == FEATURE_DIM
+    # Legacy cache rows may contain non-finite values, but new extraction output
+    # should always be browser-JSON-safe before it is cached or streamed.
+    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
     return features.tolist()
