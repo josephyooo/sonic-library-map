@@ -308,12 +308,15 @@ export async function getArtists(
     const batch = artistIds.slice(i, i + batchSize);
     const ids = batch.join(",");
 
-    const data = await spotifyFetch<{ artists: SpotifyArtist[] }>(
+    const data = await spotifyFetch<{ artists: (SpotifyArtist | null)[] }>(
       `${SPOTIFY_API_BASE}/artists?ids=${ids}`,
       accessToken,
     );
 
-    allArtists.push(...data.artists);
+    const validArtists = data.artists.filter(
+      (artist): artist is SpotifyArtist => artist !== null,
+    );
+    allArtists.push(...validArtists);
 
     if (onProgress) {
       onProgress(

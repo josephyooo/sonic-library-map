@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { scrapeGenreCoordinates } from "@/lib/genre-scraper";
 import { getCachedLibrary, getCachedGenres, cacheGenres } from "@/lib/db";
+import type { SpotifyArtist } from "@/lib/spotify";
 
 export const dynamic = "force-dynamic";
+
+function isSpotifyArtist(value: unknown): value is SpotifyArtist {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "genres" in value &&
+    Array.isArray(value.genres)
+  );
+}
 
 export async function GET() {
   const session = await getSession();
@@ -35,6 +47,7 @@ export async function GET() {
     // Build artist ID → genres lookup
     const artistGenres = new Map<string, string[]>();
     for (const artist of library.artists) {
+      if (!isSpotifyArtist(artist)) continue;
       if (artist.genres.length > 0) {
         artistGenres.set(
           artist.id,
