@@ -340,6 +340,29 @@ class _YdlLogBridge:
 
 _YDL_BRIDGE = _YdlLogBridge()
 
+COMPLETE_AUDIO_EXTENSIONS = {".m4a", ".mp3", ".opus", ".webm"}
+INCOMPLETE_AUDIO_SUFFIXES = (".part", ".temp", ".tmp", ".ytdl")
+
+
+def _is_complete_audio_path(file_path: str) -> bool:
+    name = os.path.basename(file_path)
+    if any(name.endswith(suffix) for suffix in INCOMPLETE_AUDIO_SUFFIXES):
+        return False
+    return os.path.isfile(file_path) and os.path.getsize(file_path) > 0
+
+
+def _find_downloaded_audio(video_id: str, output_dir: str, expected_path: str) -> str | None:
+    if _is_complete_audio_path(expected_path):
+        return expected_path
+
+    for file_name in sorted(os.listdir(output_dir)):
+        path = os.path.join(output_dir, file_name)
+        stem, ext = os.path.splitext(file_name)
+        if stem == video_id and ext.lower() in COMPLETE_AUDIO_EXTENSIONS:
+            if _is_complete_audio_path(path):
+                return path
+    return None
+
 
 def download_audio(video_id: str, output_dir: str) -> str | None:
     """Download audio for a YouTube video ID. Returns path to downloaded file."""
@@ -355,12 +378,12 @@ def download_audio(video_id: str, output_dir: str) -> str | None:
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            ydl.download([f"https://music.youtube.com/watch?v={video_id}"])
-
-        # Find the downloaded file (extension varies)
-        for f in os.listdir(output_dir):
-            if f.startswith(video_id):
-                return os.path.join(output_dir, f)
+            info = ydl.extract_info(
+                f"https://music.youtube.com/watch?v={video_id}",
+                download=True,
+            )
+            file_path = ydl.prepare_filename(info)
+        return _find_downloaded_audio(video_id, output_dir, file_path)
     except Exception as e:
         logger.warning("Download failed for %s: %s", video_id, e)
 
