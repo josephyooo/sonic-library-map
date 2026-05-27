@@ -116,8 +116,61 @@ def _get_db() -> sqlite3.Connection:
             coordinates TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS track_failures (
+            spotify_id TEXT PRIMARY KEY,
+            reason TEXT NOT NULL,
+            failed_at INTEGER NOT NULL
+        )
+    """)
     conn.commit()
     return conn
+
+
+def is_track_failed(spotify_id: str) -> bool:
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT 1 FROM track_failures WHERE spotify_id = ?", (spotify_id,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def mark_track_failed(spotify_id: str, reason: str) -> None:
+    import time
+    conn = _get_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO track_failures (spotify_id, reason, failed_at) VALUES (?, ?, ?)",
+        (spotify_id, reason, int(time.time())),
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_track_failure(spotify_id: str) -> None:
+    conn = _get_db()
+    conn.execute("DELETE FROM track_failures WHERE spotify_id = ?", (spotify_id,))
+    conn.commit()
+    conn.close()
+
+
+def count_failed_in(spotify_ids: list[str]) -> int:
+    if not spotify_ids:
+        return 0
+    conn = _get_db()
+    try:
+        total = 0
+        for start in range(0, len(spotify_ids), 500):
+            batch = spotify_ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM track_failures WHERE spotify_id IN ({placeholders})",
+                batch,
+            ).fetchone()
+            total += row[0] if row else 0
+        return total
+    finally:
+        conn.close()
 
 
 def get_cached_match(spotify_id: str) -> MatchResult | None:
@@ -400,7 +453,8 @@ def search_and_download(
 
     Checks download cache and match cache first. Downloads to persistent
     AUDIO_DIR so files can be reused across extraction runs.
-    Returns None if no match or download fails.
+    Returns None if no match or download fails. Past failures are cached
+    in track_failures and skipped — clear that table to retry.
     """
     # Check if we already have the file on disk
     cached_path = get_cached_download(query.spotify_id)
@@ -415,17 +469,22 @@ def search_and_download(
                 duration_s=match.duration_s,
             )
 
+    if is_track_failed(query.spotify_id):
+        return None
+
     # Search for match
     match = get_cached_match(query.spotify_id)
     if match is None:
         match = search_track(yt, query)
     if match is None:
+        mark_track_failed(query.spotify_id, "no_match")
         return None
 
     # Download to persistent directory
     os.makedirs(AUDIO_DIR, exist_ok=True)
     file_path = download_audio(match.video_id, AUDIO_DIR)
     if file_path is None:
+        mark_track_failed(query.spotify_id, "download_failed")
         return None
 
     cache_download(query.spotify_id, match.video_id, file_path)

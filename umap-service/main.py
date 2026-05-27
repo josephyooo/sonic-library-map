@@ -433,9 +433,11 @@ class CachedFeaturesRequest(BaseModel):
 @app.post("/features/cached")
 async def get_cached(body: CachedFeaturesRequest):
     """Return cached TF embeddings and raw features for the given track IDs only."""
-    all_embeddings, all_raw = await asyncio.gather(
+    from audio_source import count_failed_in
+    all_embeddings, all_raw, failed = await asyncio.gather(
         asyncio.to_thread(get_all_cached_embeddings),
         asyncio.to_thread(get_all_cached_features),
+        asyncio.to_thread(count_failed_in, body.track_ids),
     )
     requested = set(body.track_ids)
     embeddings = {k: v for k, v in all_embeddings.items() if k in requested}
@@ -444,6 +446,7 @@ async def get_cached(body: CachedFeaturesRequest):
         "features": embeddings,
         "raw_features": raw,
         "count": len(embeddings),
+        "failed": failed,
     }
 
 
