@@ -68,7 +68,7 @@ export default function DashboardClient() {
   const [previewEnabled, setPreviewEnabled] = useState(false);
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
   const [previewStart, setPreviewStart] = useState(30);
-  const [previewStatus, setPreviewStatus] = useState<"idle" | "waiting" | "loading" | "playing">("idle");
+  const [previewStatus, setPreviewStatus] = useState<"idle" | "waiting" | "loading" | "playing" | "unavailable">("idle");
 
   // Auto-load cached features when UMAP is first selected
   useEffect(() => {
@@ -584,6 +584,7 @@ export default function DashboardClient() {
               if (s === "playing") return "playing";
               if (s === "buffering") return prev === "playing" ? "playing" : "loading";
               if (s === "stopped") return prev === "waiting" ? "waiting" : "idle";
+              if (s === "unavailable") return "unavailable";
               return prev;
             });
           }}

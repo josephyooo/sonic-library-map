@@ -56,3 +56,4 @@ umap-service/data/
 
 # ML model files (download separately)
 umap-service/models/
+.audit-loop/

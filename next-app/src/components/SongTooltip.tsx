@@ -7,7 +7,7 @@ interface SongTooltipProps {
   info: HoveredPoint;
   playlistNames: Map<string, string>;
   featureLabel?: string | null;
-  previewStatus?: "idle" | "waiting" | "loading" | "playing";
+  previewStatus?: "idle" | "waiting" | "loading" | "playing" | "unavailable";
 }
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -42,12 +42,13 @@ export default function SongTooltip({ info, playlistNames, featureLabel, preview
     .map((id) => playlistNames.get(id))
     .filter(Boolean);
 
-  const spinnerActive = previewStatus !== "idle";
+  const spinnerActive = previewStatus !== "idle" && previewStatus !== "unavailable";
   const spinner = useSpinnerFrame(spinnerActive);
   const statusLabel =
     previewStatus === "waiting" ? "hold hover…"
     : previewStatus === "loading" ? "loading…"
     : previewStatus === "playing" ? "playing"
+    : previewStatus === "unavailable" ? "preview unavailable"
     : null;
 
   return (

@@ -21,6 +21,7 @@ declare global {
           events?: {
             onReady?: (e: { target: YTPlayer }) => void;
             onStateChange?: (e: { data: number; target: YTPlayer }) => void;
+            onError?: (e: { data: number; target: YTPlayer }) => void;
           };
         },
       ) => YTPlayer;
@@ -57,7 +58,7 @@ interface PreviewPlayerProps {
   videoId: string | null;
   startSeconds?: number;
   enabled: boolean;
-  onStateChange?: (state: "playing" | "buffering" | "stopped") => void;
+  onStateChange?: (state: "playing" | "buffering" | "stopped" | "unavailable") => void;
 }
 
 export default function PreviewPlayer({ videoId, startSeconds = 30, enabled, onStateChange }: PreviewPlayerProps) {
@@ -94,6 +95,7 @@ export default function PreviewPlayer({ videoId, startSeconds = 30, enabled, onS
             else if (e.data === s.BUFFERING) onStateChangeRef.current?.("buffering");
             else if (e.data === s.ENDED || e.data === s.PAUSED) onStateChangeRef.current?.("stopped");
           },
+          onError: () => onStateChangeRef.current?.("unavailable"),
         },
       });
     });
