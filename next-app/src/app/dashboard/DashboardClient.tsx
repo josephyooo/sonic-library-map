@@ -34,6 +34,13 @@ const AXIS_TICK_FORMATTERS: Record<number, (v: number) => string> = {
   32: (v) => `${v.toFixed(0)}`,               // Loudness (LUFS)
 };
 
+const VIEW_LABELS: Record<ViewMode, string> = {
+  default: "Year / Pop",
+  umap: "UMAP",
+  genre: "Genre",
+  custom: "Custom",
+};
+
 function parseReleaseYear(date: string): number {
   const year = parseInt(date.slice(0, 4), 10);
   return isNaN(year) ? 2000 : year;
@@ -45,7 +52,10 @@ export default function DashboardClient() {
   const [playlistVisibility, setPlaylistVisibility] = useState<
     Record<string, boolean>
   >({});
-  const [viewMode, setViewMode] = useState<ViewMode>("default");
+  const [viewMode, setViewMode] = useState<ViewMode>("umap");
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [clustersEnabled, setClustersEnabled] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [umapCoords, setUmapCoords] = useState<Record<string, [number, number]> | null>(null);
   const [umapAxisLabels, setUmapAxisLabels] = useState<{
     x: { name: string; directionLow: string; directionHigh: string } | null;
@@ -56,6 +66,7 @@ export default function DashboardClient() {
   const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
+  const [failedFeatureCount, setFailedFeatureCount] = useState(0);
   const [rawFeatures, setRawFeatures] = useState<Record<string, number[]> | null>(null);
   const [colorFeatureIdx, setColorFeatureIdx] = useState<number | null>(null);
   const cachedFeaturesLoaded = useRef(false);
@@ -76,19 +87,28 @@ export default function DashboardClient() {
     cachedFeaturesLoaded.current = true;
 
     (async () => {
+      setUmapLoading(true);
       try {
         const response = await fetch("/api/features");
         handleApiError(response);
-        if (!response.ok) return;
+        if (!response.ok) {
+          setUmapLoading(false);
+          return;
+        }
         const data = await response.json();
         const count = data.count ?? 0;
         setCachedFeatureCount(count);
+        setFailedFeatureCount(data.failed ?? 0);
         if (data.raw_features) setRawFeatures(data.raw_features);
 
-        if (count >= 5) {
+        if (count < 5) {
+          setUmapLoading(false);
+          return;
+        }
+
+        {
           // Compute UMAP from cached TF embeddings, with raw features for axis labels
           const trackIds = libraryData.tracks.map((t) => t.id);
-          setUmapLoading(true);
           const umapResponse = await fetch("/api/umap", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -113,12 +133,18 @@ export default function DashboardClient() {
         }
       } catch (err) {
         console.error("Failed to load cached features:", err);
+        setUmapLoading(false);
       }
     })();
   }, [viewMode, libraryData]);
 
-  // Fetch clusters when UMAP coordinates update (with enough tracks)
+  // Fetch clusters when UMAP coordinates update (with enough tracks). Opt-in via button.
   useEffect(() => {
+    if (!clustersEnabled) {
+      setClusterLabels(null);
+      setClusterInsights([]);
+      return;
+    }
     if (!umapCoords || !libraryData) return;
     if (Object.keys(umapCoords).length < 20) return;
 
@@ -148,7 +174,7 @@ export default function DashboardClient() {
     })();
 
     return () => controller.abort();
-  }, [umapCoords, libraryData]);
+  }, [clustersEnabled, umapCoords, libraryData]);
 
   const playlists = useMemo(() => {
     if (!libraryData) return [];
@@ -273,7 +299,7 @@ export default function DashboardClient() {
       id: p.id,
       name: p.name,
       color: PALETTE[i % PALETTE.length],
-      visible: playlistVisibility[p.id] ?? true,
+      visible: playlistVisibility[p.id] ?? false,
     }));
   }, [visiblePlaylists, playlistVisibility]);
 
@@ -393,18 +419,18 @@ export default function DashboardClient() {
   }, [colorFeatureIdx, rawFeatures]);
 
   const handleToggle = useCallback((id: string) => {
-    setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? true) }));
+    setPlaylistVisibility((prev) => ({ ...prev, [id]: !(prev[id] ?? false) }));
   }, []);
 
   const handleShowAll = useCallback(() => {
-    setPlaylistVisibility({});
-  }, []);
-
-  const handleHideAll = useCallback(() => {
     const vis: Record<string, boolean> = {};
-    for (const p of visiblePlaylists) vis[p.id] = false;
+    for (const p of visiblePlaylists) vis[p.id] = true;
     setPlaylistVisibility(vis);
   }, [visiblePlaylists]);
+
+  const handleHideAll = useCallback(() => {
+    setPlaylistVisibility({});
+  }, []);
 
   const handleClick = useCallback((point: PlotPoint) => {
     window.open(point.track.external_urls.spotify, "_blank", "noopener,noreferrer");
@@ -487,7 +513,7 @@ export default function DashboardClient() {
 
   return (
     <div className="flex h-full w-full">
-      <div className="relative flex-1">
+      <div className="relative min-w-0 flex-1">
         <ScatterPlot
           points={points}
           playlistColors={scatterPlotColors}
@@ -500,6 +526,7 @@ export default function DashboardClient() {
           yLabel={axisLabels.y}
           xFormat={viewMode === "default" ? formatYear : customAxisFormats.x}
           yFormat={customAxisFormats.y}
+          showTickLabels={viewMode === "default" || viewMode === "custom"}
         />
         {points.length === 0 && !umapLoading && !genreLoading && viewMode !== "default" && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -518,17 +545,49 @@ export default function DashboardClient() {
             <StatBadge label="Playlists" value={visiblePlaylists.length} />
             <StatBadge label="Artists" value={libraryData.artists.length} />
           </div>
-          <ViewToggle
-            current={viewMode}
-            genreLoading={genreLoading}
-            onChange={handleViewChange}
-          />
-          {viewMode === "umap" && rawFeatures && (
-            <FeatureOverlay
-              selected={colorFeatureIdx}
-              onChange={setColorFeatureIdx}
-            />
-          )}
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => setViewMenuOpen((v) => !v)}
+              className="flex items-center gap-2 self-start rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs font-medium text-zinc-300 backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+            >
+              <span aria-hidden>{viewMenuOpen ? "✕" : "☰"}</span>
+              <span>View: {VIEW_LABELS[viewMode]}</span>
+            </button>
+            {viewMenuOpen && (
+              <>
+                <ViewToggle
+                  current={viewMode}
+                  genreLoading={genreLoading}
+                  onChange={handleViewChange}
+                />
+                <div className="flex flex-wrap gap-1">
+                  {viewMode === "umap" && umapCoords && (
+                    <button
+                      type="button"
+                      onClick={() => setClustersEnabled((v) => !v)}
+                      className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs text-zinc-300 backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+                    >
+                      {clustersEnabled ? "✓ Clusters" : "Clusters"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen((v) => !v)}
+                    className="rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs text-zinc-300 backdrop-blur-sm transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+                  >
+                    {sidebarOpen ? "✓ Playlists" : "Playlists"}
+                  </button>
+                </div>
+                {viewMode === "umap" && rawFeatures && (
+                  <FeatureOverlay
+                    selected={colorFeatureIdx}
+                    onChange={setColorFeatureIdx}
+                  />
+                )}
+              </>
+            )}
+          </div>
           {viewMode === "custom" && (
             <AxisSelector
               xIdx={customXIdx}
@@ -541,7 +600,8 @@ export default function DashboardClient() {
             <FeatureExtractor
               libraryData={libraryData}
               cachedCount={cachedFeatureCount}
-              showButton={viewMode === "umap"}
+              failedCount={failedFeatureCount}
+              showButton={viewMode === "umap" && !umapLoading}
               onFeaturesReady={handleFeaturesReady}
               onRawFeaturesReady={setRawFeatures}
             />
@@ -549,7 +609,7 @@ export default function DashboardClient() {
           {umapLoading && (
             <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 backdrop-blur-sm">
               <div className="h-3 w-3 animate-spin rounded-full border border-zinc-600 border-t-green-500" />
-              <span className="text-xs text-zinc-400">Computing UMAP...</span>
+              <span className="text-xs text-zinc-400">Loading map…</span>
             </div>
           )}
         </div>
@@ -591,14 +651,16 @@ export default function DashboardClient() {
         />
       </div>
 
-      <div className="flex w-56 flex-col overflow-y-auto">
-        <PlaylistLegend
-          playlists={playlistColors}
-          onToggle={handleToggle}
-          onShowAll={handleShowAll}
-          onHideAll={handleHideAll}
-        />
-      </div>
+      {sidebarOpen && (
+        <div className="flex w-56 shrink-0 flex-col overflow-y-auto">
+          <PlaylistLegend
+            playlists={playlistColors}
+            onToggle={handleToggle}
+            onShowAll={handleShowAll}
+            onHideAll={handleHideAll}
+          />
+        </div>
+      )}
     </div>
   );
 }

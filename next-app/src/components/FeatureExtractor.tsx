@@ -17,6 +17,7 @@ interface Progress {
 interface FeatureExtractorProps {
   libraryData: LibraryData;
   cachedCount: number;
+  failedCount?: number;
   showButton: boolean;
   onFeaturesReady: (features: Record<string, number[]>) => void;
   onRawFeaturesReady?: (features: Record<string, number[]>) => void;
@@ -25,6 +26,7 @@ interface FeatureExtractorProps {
 export default function FeatureExtractor({
   libraryData,
   cachedCount,
+  failedCount = 0,
   showButton,
   onFeaturesReady,
   onRawFeaturesReady,
@@ -238,8 +240,11 @@ export default function FeatureExtractor({
     );
   }
 
-  // Button only visible when showButton is true (UMAP mode)
+  // Button only visible when showButton is true (UMAP mode) and there's
+  // still work to do — i.e., uncached, non-failed tracks remain.
   if (!showButton) return null;
+  const remaining = libraryData.tracks.length - cachedCount - failedCount;
+  if (remaining <= 0 && cachedCount > 0) return null;
 
   if (error) {
     return (

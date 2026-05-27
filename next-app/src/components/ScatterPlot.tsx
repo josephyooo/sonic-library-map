@@ -33,6 +33,7 @@ interface ScatterPlotProps {
   yLabel: string;
   xFormat?: (tick: number) => string;
   yFormat?: (tick: number) => string;
+  showTickLabels?: boolean;
 }
 
 export type { HoveredPoint };
@@ -46,6 +47,7 @@ export default function ScatterPlot({
   yLabel,
   xFormat,
   yFormat,
+  showTickLabels = true,
   highlightedTracks,
   featureColorMap,
   featureValueMap,
@@ -127,7 +129,7 @@ export default function ScatterPlot({
     ctx.fillStyle = themeColors.base;
     ctx.fillRect(0, 0, size.width, size.height);
 
-    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat, yFormat, themeColors);
+    drawAxes(ctx, xs, ys, transform, size, xLabel, yLabel, xFormat, yFormat, themeColors, showTickLabels);
 
     // Draw feature heatmap gradient when a feature overlay is active
     if (featureValueMap && featureValueMap.size > 0) {
@@ -277,7 +279,7 @@ export default function ScatterPlot({
       }
     }
     ctx.globalAlpha = 1;
-  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, featureValueMap, xLabel, yLabel, xFormat, yFormat]);
+  }, [points, size, xs, ys, getPointColor, playlistColors, playlistPointMap, highlightedTracks, featureColorMap, featureValueMap, xLabel, yLabel, xFormat, yFormat, showTickLabels]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -405,6 +407,7 @@ function drawAxes(
   xFormat?: (tick: number) => string,
   yFormat?: (tick: number) => string,
   theme?: { base: string; surface0: string; overlay0: string; subtext0: string; text: string },
+  showTickLabels = true,
 ) {
   const gridColor = theme?.surface0 ?? "#27272a";
   const tickColor = theme?.overlay0 ?? "#71717a";
@@ -429,7 +432,7 @@ function drawAxes(
     ctx.moveTo(px, 20);
     ctx.lineTo(px, size.height - 40);
     ctx.stroke();
-    ctx.fillText(formatX(tick), px, size.height - 25);
+    if (showTickLabels) ctx.fillText(formatX(tick), px, size.height - 25);
   }
 
   ctx.textAlign = "right";
@@ -441,7 +444,7 @@ function drawAxes(
     ctx.moveTo(50, py);
     ctx.lineTo(size.width - 10, py);
     ctx.stroke();
-    ctx.fillText(formatY(tick), 45, py + 4);
+    if (showTickLabels) ctx.fillText(formatY(tick), 45, py + 4);
   }
 
   ctx.fillStyle = labelColor;
