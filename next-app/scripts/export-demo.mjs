@@ -35,11 +35,7 @@ const libRow = nextDb
 if (!libRow) throw new Error("No library_cache row — run a Spotify sync first");
 
 const rawTracks = JSON.parse(libRow.tracks);
-const rawPlaylists = JSON.parse(libRow.playlists);
 const playlistTracks = JSON.parse(libRow.playlist_tracks);
-const rawArtists = JSON.parse(libRow.artists).filter(
-  (a) => a && typeof a === "object" && typeof a.id === "string",
-);
 
 // Pick the smallest album image (usually 64px) to keep bundle tiny
 function smallestImage(images) {
@@ -52,22 +48,12 @@ function smallestImage(images) {
 const tracks = rawTracks.map((t) => ({
   id: t.id,
   name: t.name,
-  popularity: t.popularity,
   album: {
     name: t.album.name,
-    release_date: t.album.release_date,
     images: [smallestImage(t.album.images)].filter(Boolean),
   },
-  artists: t.artists.map((a) => ({ id: a.id, name: a.name })),
+  artists: t.artists.map((a) => ({ name: a.name })),
   external_urls: { spotify: t.external_urls?.spotify ?? "" },
-}));
-
-const playlists = rawPlaylists.map((p) => ({ id: p.id, name: p.name }));
-
-const artists = rawArtists.map((a) => ({
-  id: a.id,
-  name: a.name,
-  genres: a.genres ?? [],
 }));
 
 // ─── UMAP coords ─────────────────────────────────────────────────────────
@@ -108,64 +94,6 @@ for (const row of ytRows) {
   youtubeIds[row.spotify_id] = [row.video_id, row.duration_s];
 }
 
-// ─── Raw features ────────────────────────────────────────────────────────
-const rawFeatureRows = sideDb
-  .prepare("SELECT spotify_id, features FROM audio_features")
-  .all();
-const rawFeatures = {};
-// Round features to 4 decimals; the UI uses them for color scales + coarse axes
-const round4 = (n) => Math.round(n * 10000) / 10000;
-for (const row of rawFeatureRows) {
-  if (!trackIds.has(row.spotify_id)) continue;
-  try {
-    const arr = JSON.parse(row.features);
-    rawFeatures[row.spotify_id] = arr.map(round4);
-  } catch {
-    // skip
-  }
-}
-
-// ─── Genre coords (port /api/genres mapping) ────────────────────────────
-let genreCoords = {};
-const genreRow = nextDb.prepare("SELECT genres FROM genre_cache LIMIT 1").get();
-if (genreRow) {
-  const genreList = JSON.parse(genreRow.genres);
-  const genreLookup = new Map();
-  for (const g of genreList) genreLookup.set(g.name, { x: g.x, y: g.y });
-
-  const artistGenres = new Map();
-  for (const a of rawArtists) {
-    if (a.genres?.length > 0) {
-      artistGenres.set(
-        a.id,
-        a.genres.map((g) => g.toLowerCase()),
-      );
-    }
-  }
-
-  for (const t of rawTracks) {
-    const xs = [];
-    const ys = [];
-    for (const a of t.artists) {
-      const gs = artistGenres.get(a.id);
-      if (!gs) continue;
-      for (const g of gs) {
-        const c = genreLookup.get(g);
-        if (c) {
-          xs.push(c.x);
-          ys.push(c.y);
-        }
-      }
-    }
-    if (xs.length > 0) {
-      genreCoords[t.id] = [
-        round3(xs.reduce((a, b) => a + b) / xs.length),
-        round3(ys.reduce((a, b) => a + b) / ys.length),
-      ];
-    }
-  }
-}
-
 // ─── Clusters (optional, requires sidecar) ───────────────────────────────
 let clusterInsights = null;
 let clusterLabels = null;
@@ -199,16 +127,8 @@ if (Object.keys(umapCoords).length >= 20) {
 await mkdir(OUT, { recursive: true });
 
 const bundle = {
-  "library.json": {
-    tracks,
-    playlists,
-    playlistTracks,
-    artistCount: artists.length,
-    fetchedAt: libRow.fetched_at,
-  },
+  "library.json": { tracks },
   "umap.json": { coordinates: umapCoords },
-  "genres.json": { coordinates: genreCoords },
-  "raw-features.json": { features: rawFeatures },
   "youtube-ids.json": { ids: youtubeIds },
 };
 if (clusterInsights) {
@@ -224,7 +144,6 @@ for (const [name, data] of Object.entries(bundle)) {
 
 console.log(`\nExported to ${OUT}`);
 console.log(`Tracks: ${tracks.length} | UMAP: ${Object.keys(umapCoords).length} | ` +
-  `Genres: ${Object.keys(genreCoords).length} | Raw features: ${Object.keys(rawFeatures).length} | ` +
   `YT ids: ${Object.keys(youtubeIds).length} | Clusters: ${clusterInsights?.length ?? "skipped"}`);
 
 nextDb.close();

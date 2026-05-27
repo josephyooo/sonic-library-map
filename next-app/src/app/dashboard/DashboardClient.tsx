@@ -65,6 +65,7 @@ export default function DashboardClient() {
   const umapAbortRef = useRef<AbortController | null>(null);
   const [genreCoords, setGenreCoords] = useState<Record<string, [number, number]> | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
+  const genreAbortRef = useRef<AbortController | null>(null);
   const [cachedFeatureCount, setCachedFeatureCount] = useState(0);
   const [failedFeatureCount, setFailedFeatureCount] = useState(0);
   const [rawFeatures, setRawFeatures] = useState<Record<string, number[]> | null>(null);
@@ -86,10 +87,13 @@ export default function DashboardClient() {
     if (viewMode !== "umap" || cachedFeaturesLoaded.current || !libraryData) return;
     cachedFeaturesLoaded.current = true;
 
+    const controller = new AbortController();
+    const { signal } = controller;
+
     (async () => {
       setUmapLoading(true);
       try {
-        const response = await fetch("/api/features");
+        const response = await fetch("/api/features", { signal });
         handleApiError(response);
         if (!response.ok) {
           setUmapLoading(false);
@@ -117,6 +121,7 @@ export default function DashboardClient() {
               features: data.features,
               raw_features: data.raw_features ?? null,
             }),
+            signal,
           });
           handleApiError(umapResponse);
           if (umapResponse.ok) {
@@ -132,10 +137,13 @@ export default function DashboardClient() {
           setUmapLoading(false);
         }
       } catch (err) {
+        if (signal.aborted) return;
         console.error("Failed to load cached features:", err);
         setUmapLoading(false);
       }
     })();
+
+    return () => controller.abort();
   }, [viewMode, libraryData]);
 
   // Fetch clusters when UMAP coordinates update (with enough tracks). Opt-in via button.
@@ -216,18 +224,18 @@ export default function DashboardClient() {
   // Load YouTube IDs once per session for hover-preview playback.
   useEffect(() => {
     if (!libraryData) return;
-    let cancelled = false;
+    const controller = new AbortController();
     (async () => {
       try {
-        const res = await fetch("/api/youtube-ids");
+        const res = await fetch("/api/youtube-ids", { signal: controller.signal });
         if (!res.ok) return;
         const data = await res.json();
-        if (!cancelled) setYoutubeIds(data.ids ?? {});
+        if (!controller.signal.aborted) setYoutubeIds(data.ids ?? {});
       } catch {
         // silent — preview just won't work
       }
     })();
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [libraryData]);
 
   // Hover-triggered preview: wait 1s on the same point, then cue up its YT video.
@@ -487,16 +495,20 @@ export default function DashboardClient() {
 
       if (mode === "genre" && !genreCoords && !genreLoading) {
         setGenreLoading(true);
+        genreAbortRef.current?.abort();
+        const controller = new AbortController();
+        genreAbortRef.current = controller;
         try {
-          const response = await fetch("/api/genres");
+          const response = await fetch("/api/genres", { signal: controller.signal });
           handleApiError(response);
           if (!response.ok) throw new Error(`Genres failed: ${response.status}`);
           const data = await response.json();
-          setGenreCoords(data.coordinates);
+          if (!controller.signal.aborted) setGenreCoords(data.coordinates);
         } catch (err) {
+          if (controller.signal.aborted) return;
           console.error("Genre fetch error:", err);
         } finally {
-          setGenreLoading(false);
+          if (!controller.signal.aborted) setGenreLoading(false);
         }
       }
     },
