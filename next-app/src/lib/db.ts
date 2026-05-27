@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
 import type { LibraryData } from "./types";
+import type { SpotifyArtist } from "./spotify";
 
 export type { LibraryData } from "./types";
 
@@ -39,9 +40,19 @@ function initTables(db: Database.Database) {
       fetched_at INTEGER NOT NULL
     );
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS artists_cache (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      genres TEXT NOT NULL,
+      popularity INTEGER NOT NULL,
+      fetched_at INTEGER NOT NULL
+    );
+  `);
 }
 
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const ARTISTS_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function getCachedLibrary(userId: string): LibraryData | null {
   const db = getDb();
@@ -63,6 +74,33 @@ export function getCachedLibrary(userId: string): LibraryData | null {
 
   const age = Date.now() - row.fetched_at;
   if (age > CACHE_TTL_MS) return null;
+
+  return {
+    tracks: JSON.parse(row.tracks),
+    playlists: JSON.parse(row.playlists),
+    playlistTracks: JSON.parse(row.playlist_tracks),
+    audioFeatures: JSON.parse(row.audio_features),
+    artists: JSON.parse(row.artists),
+    fetchedAt: row.fetched_at,
+  };
+}
+
+export function getStaleLibrary(userId: string): LibraryData | null {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM library_cache WHERE user_id = ? AND fetched_at > 0")
+    .get(userId) as
+    | {
+        tracks: string;
+        playlists: string;
+        playlist_tracks: string;
+        audio_features: string;
+        artists: string;
+        fetched_at: number;
+      }
+    | undefined;
+
+  if (!row) return null;
 
   return {
     tracks: JSON.parse(row.tracks),
@@ -160,4 +198,56 @@ export function getPartialLibrary(userId: string): {
     playlists: JSON.parse(row.playlists),
     playlistTracks: JSON.parse(row.playlist_tracks),
   };
+}
+
+export function getCachedArtists(ids: string[]): {
+  hits: SpotifyArtist[];
+  miss: string[];
+} {
+  if (ids.length === 0) return { hits: [], miss: [] };
+  const db = getDb();
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT id, name, genres, popularity, fetched_at FROM artists_cache WHERE id IN (${placeholders})`,
+    )
+    .all(...ids) as {
+    id: string;
+    name: string;
+    genres: string;
+    popularity: number;
+    fetched_at: number;
+  }[];
+
+  const now = Date.now();
+  const hits: SpotifyArtist[] = [];
+  const fresh = new Set<string>();
+  for (const row of rows) {
+    if (now - row.fetched_at <= ARTISTS_CACHE_TTL_MS) {
+      hits.push({
+        id: row.id,
+        name: row.name,
+        genres: JSON.parse(row.genres),
+        popularity: row.popularity,
+      });
+      fresh.add(row.id);
+    }
+  }
+  const miss = ids.filter((id) => !fresh.has(id));
+  return { hits, miss };
+}
+
+export function cacheArtists(artists: SpotifyArtist[]): void {
+  if (artists.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO artists_cache (id, name, genres, popularity, fetched_at) VALUES (?, ?, ?, ?, ?)`,
+  );
+  const now = Date.now();
+  const insertMany = db.transaction((rows: SpotifyArtist[]) => {
+    for (const a of rows) {
+      stmt.run(a.id, a.name, JSON.stringify(a.genres), a.popularity, now);
+    }
+  });
+  insertMany(artists);
 }

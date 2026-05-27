@@ -1,4 +1,5 @@
 import PQueue from "p-queue";
+import { getCachedArtists, cacheArtists } from "./db";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -308,11 +309,14 @@ export async function getArtists(
   accessToken: string,
   onProgress?: ProgressCallback,
 ): Promise<SpotifyArtist[]> {
+  const { hits, miss } = getCachedArtists(artistIds);
+  if (miss.length === 0) return hits;
+
   const allArtists: SpotifyArtist[] = [];
   const batchSize = 50; // Spotify max for /artists endpoint
 
-  for (let i = 0; i < artistIds.length; i += batchSize) {
-    const batch = artistIds.slice(i, i + batchSize);
+  for (let i = 0; i < miss.length; i += batchSize) {
+    const batch = miss.slice(i, i + batchSize);
     const ids = batch.join(",");
 
     const data = await spotifyFetch<{ artists: (SpotifyArtist | null)[] }>(
@@ -324,15 +328,16 @@ export async function getArtists(
       (artist): artist is SpotifyArtist => artist !== null,
     );
     allArtists.push(...validArtists);
+    cacheArtists(validArtists);
 
     if (onProgress) {
       onProgress(
         "Fetching artist genres",
-        Math.min(i + batchSize, artistIds.length),
-        artistIds.length,
+        Math.min(i + batchSize, miss.length),
+        miss.length,
       );
     }
   }
 
-  return allArtists;
+  return [...hits, ...allArtists];
 }

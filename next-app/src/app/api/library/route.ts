@@ -10,6 +10,7 @@ import {
 } from "@/lib/spotify";
 import {
   getCachedLibrary,
+  getStaleLibrary,
   cacheLibrary,
   savePartialLibrary,
   getPartialLibrary,
@@ -171,6 +172,14 @@ export async function GET() {
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : "Unknown error";
         console.error("Library fetch error:", errMsg);
+        if (errMsg.includes("429") || errMsg.toLowerCase().includes("rate limit")) {
+          const stale = getStaleLibrary(auth.userId);
+          if (stale) {
+            send({ type: "complete", data: stale, fromCache: true, stale: true });
+            controller.close();
+            return;
+          }
+        }
         send({ type: "error", message: errMsg });
         controller.close();
       }
