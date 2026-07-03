@@ -29,10 +29,16 @@ const nextDb = new Database(NEXT_DB, { readonly: true });
 const sideDb = new Database(SIDECAR_DB, { readonly: true });
 
 // ─── Library ─────────────────────────────────────────────────────────────
+// library_cache holds one row per Spotify user that has ever logged in and
+// synced — always select the demo owner's row explicitly, never LIMIT 1.
+const DEMO_USER_ID = process.env.DEMO_USER_ID ?? "polokniko";
 const libRow = nextDb
-  .prepare("SELECT * FROM library_cache LIMIT 1")
-  .get();
-if (!libRow) throw new Error("No library_cache row — run a Spotify sync first");
+  .prepare("SELECT * FROM library_cache WHERE user_id = ?")
+  .get(DEMO_USER_ID);
+if (!libRow)
+  throw new Error(
+    `No library_cache row for user "${DEMO_USER_ID}" — run a Spotify sync first`,
+  );
 
 const rawTracks = JSON.parse(libRow.tracks);
 const playlistTracks = JSON.parse(libRow.playlist_tracks);
